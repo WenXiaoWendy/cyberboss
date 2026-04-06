@@ -291,10 +291,14 @@ function buildTurnInputPayload(text) {
 
 function buildTurnStartParams({ threadId, input, model, effort, accessMode, workspaceRoot }) {
   const params = { threadId, input };
+  const normalizedWorkspaceRoot = normalizeNonEmptyString(workspaceRoot);
   const normalizedModel = normalizeNonEmptyString(model);
   const normalizedEffort = normalizeNonEmptyString(effort);
   const normalizedAccessMode = normalizeAccessMode(accessMode);
   const executionPolicies = buildExecutionPolicies(normalizedAccessMode, workspaceRoot);
+  if (normalizedWorkspaceRoot) {
+    params.cwd = normalizedWorkspaceRoot;
+  }
   if (normalizedModel) {
     params.model = normalizedModel;
   }
