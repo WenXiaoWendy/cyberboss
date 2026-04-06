@@ -4,6 +4,7 @@ const { resolveSelectedAccount } = require("./account-store");
 const { loadPersistedContextTokens, persistContextToken } = require("./context-token-store");
 const { runLoginFlow } = require("./login");
 const { getConfig, getUpdates, sendMessage, sendTyping } = require("./api");
+const { normalizeWeixinIncomingMessage } = require("./message-utils");
 const { loadSyncBuffer, saveSyncBuffer } = require("./sync-buffer-store");
 
 const LONG_POLL_TIMEOUT_MS = 35_000;
@@ -114,6 +115,10 @@ function createWeixinChannelAdapter(config) {
         }
       }
       return response;
+    },
+    normalizeIncomingMessage(message) {
+      const account = ensureAccount();
+      return normalizeWeixinIncomingMessage(message, config, account.accountId);
     },
     async sendText({ userId, text, contextToken = "" }) {
       const account = ensureAccount();

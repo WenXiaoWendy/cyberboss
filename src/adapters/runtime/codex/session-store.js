@@ -43,6 +43,59 @@ class SessionStore {
     return this.state.bindings[bindingKey] || null;
   }
 
+  updateBinding(bindingKey, nextBinding) {
+    this.state.bindings[bindingKey] = {
+      ...(this.state.bindings[bindingKey] || {}),
+      ...(nextBinding || {}),
+    };
+    this.save();
+    return this.state.bindings[bindingKey];
+  }
+
+  getThreadIdForWorkspace(bindingKey, workspaceRoot) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return "";
+    }
+    return this.state.bindings[bindingKey]?.threadIdByWorkspaceRoot?.[normalizedWorkspaceRoot] || "";
+  }
+
+  setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId, extra = {}) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return this.getBinding(bindingKey);
+    }
+
+    const current = this.getBinding(bindingKey) || {};
+    const threadIdByWorkspaceRoot = {
+      ...getThreadMap(current),
+      [normalizedWorkspaceRoot]: normalizeValue(threadId),
+    };
+
+    return this.updateBinding(bindingKey, {
+      ...current,
+      ...extra,
+      activeWorkspaceRoot: normalizedWorkspaceRoot,
+      threadIdByWorkspaceRoot,
+    });
+  }
+
+  clearThreadIdForWorkspace(bindingKey, workspaceRoot) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return this.getBinding(bindingKey);
+    }
+    const current = this.getBinding(bindingKey) || {};
+    const threadIdByWorkspaceRoot = {
+      ...getThreadMap(current),
+      [normalizedWorkspaceRoot]: "",
+    };
+    return this.updateBinding(bindingKey, {
+      ...current,
+      threadIdByWorkspaceRoot,
+    });
+  }
+
   getAvailableModelCatalog() {
     const raw = this.state.availableModelCatalog;
     if (!raw || typeof raw !== "object") {
@@ -87,6 +140,12 @@ function createEmptyState() {
 
 function normalizeValue(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function getThreadMap(binding) {
+  return binding?.threadIdByWorkspaceRoot && typeof binding.threadIdByWorkspaceRoot === "object"
+    ? binding.threadIdByWorkspaceRoot
+    : {};
 }
 
 module.exports = { SessionStore };

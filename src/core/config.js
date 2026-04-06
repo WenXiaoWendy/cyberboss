@@ -8,6 +8,8 @@ function readConfig() {
   return {
     mode,
     stateDir,
+    workspaceId: readTextEnv("CYBERBOSS_WORKSPACE_ID") || "default",
+    workspaceRoot: readTextEnv("CYBERBOSS_WORKSPACE_ROOT") || process.cwd(),
     channel: readTextEnv("CYBERBOSS_CHANNEL") || "weixin",
     runtime: readTextEnv("CYBERBOSS_RUNTIME") || "codex",
     timelineCommand: readTextEnv("CYBERBOSS_TIMELINE_COMMAND") || "timeline-for-agent",
