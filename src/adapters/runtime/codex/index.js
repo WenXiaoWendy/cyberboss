@@ -1,4 +1,5 @@
 const { CodexRpcClient } = require("./rpc-client");
+const { mapCodexMessageToRuntimeEvent } = require("./events");
 const {
   extractAssistantText,
   extractFailureText,
@@ -36,6 +37,18 @@ function createCodexRuntimeAdapter(config) {
     },
     createClient() {
       return ensureClient();
+    },
+    onEvent(listener) {
+      if (typeof listener !== "function") {
+        return () => {};
+      }
+      const runtimeClient = ensureClient();
+      return runtimeClient.onMessage((message) => {
+        const event = mapCodexMessageToRuntimeEvent(message);
+        if (event) {
+          listener(event, message);
+        }
+      });
     },
     getSessionStore() {
       return sessionStore;
