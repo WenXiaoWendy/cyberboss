@@ -37,6 +37,7 @@ class ThreadStateStore {
           requestId: event.payload.requestId || "",
           reason: event.payload.reason || "",
           command: event.payload.command || "",
+          commandTokens: Array.isArray(event.payload.commandTokens) ? event.payload.commandTokens : [],
         };
         break;
       case "runtime.turn.completed":
@@ -59,6 +60,21 @@ class ThreadStateStore {
 
   getThreadState(threadId) {
     return this.stateByThreadId.get(threadId) || null;
+  }
+
+  resolveApproval(threadId, status = "running") {
+    const current = this.stateByThreadId.get(threadId);
+    if (!current) {
+      return null;
+    }
+    const next = {
+      ...current,
+      status,
+      pendingApproval: null,
+      updatedAt: new Date().toISOString(),
+    };
+    this.stateByThreadId.set(threadId, next);
+    return next;
   }
 
   snapshot() {

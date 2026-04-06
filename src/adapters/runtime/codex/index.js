@@ -97,6 +97,11 @@ function createCodexRuntimeAdapter(config) {
       await runtimeClient.cancelTurn({ threadId, turnId });
       return { threadId, turnId };
     },
+    async resumeThread({ threadId }) {
+      const runtimeClient = ensureClient();
+      await this.initialize();
+      return runtimeClient.resumeThread({ threadId });
+    },
     async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {} }) {
       const runtimeClient = ensureClient();
       await this.initialize();

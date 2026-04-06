@@ -82,15 +82,15 @@ cyberboss diary write
 - `/status` -> `workspace.status`
 - `/new` -> `thread.new`
 - `/stop` -> `thread.stop`
+- `/switch <threadId>` -> `thread.switch`
+- `/yes` -> `approval.accept_once`
+- `/always` -> `approval.accept_workspace`
+- `/no` -> `approval.reject_once`
 
 ### 4. 计划中的微信命令映射
 
 下一批继续接：
 
-- `/switch <threadId>` -> `thread.switch`
-- `/yes` -> `approval.accept_once`
-- `/always` -> `approval.accept_workspace`
-- `/no` -> `approval.reject_once`
 - `/model` -> `model.inspect`
 - `/model <id>` -> `model.select`
 - `/send <path>` -> `channel.send_file`

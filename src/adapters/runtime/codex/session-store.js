@@ -115,6 +115,57 @@ class SessionStore {
     return Object.keys(getThreadMap(current));
   }
 
+  findBindingForThreadId(threadId) {
+    const normalizedThreadId = normalizeValue(threadId);
+    if (!normalizedThreadId) {
+      return null;
+    }
+    for (const [bindingKey, binding] of Object.entries(this.state.bindings || {})) {
+      for (const [workspaceRoot, candidateThreadId] of Object.entries(getThreadMap(binding))) {
+        if (normalizeValue(candidateThreadId) === normalizedThreadId) {
+          return {
+            bindingKey,
+            workspaceRoot: normalizeValue(workspaceRoot),
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  getApprovalCommandAllowlistForWorkspace(workspaceRoot) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    if (!normalizedWorkspaceRoot) {
+      return [];
+    }
+    const raw = this.state.approvalCommandAllowlistByWorkspaceRoot?.[normalizedWorkspaceRoot];
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .filter((entry) => Array.isArray(entry))
+      .map((entry) => entry.map((part) => normalizeValue(part)).filter(Boolean))
+      .filter((entry) => entry.length);
+  }
+
+  rememberApprovalPrefixForWorkspace(workspaceRoot, commandTokens) {
+    const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
+    const normalizedTokens = normalizeCommandTokens(commandTokens);
+    if (!normalizedWorkspaceRoot || !normalizedTokens.length) {
+      return this.getApprovalCommandAllowlistForWorkspace(workspaceRoot);
+    }
+    const current = this.getApprovalCommandAllowlistForWorkspace(normalizedWorkspaceRoot);
+    if (!current.some((entry) => isSameTokenList(entry, normalizedTokens))) {
+      current.push(normalizedTokens);
+      this.state.approvalCommandAllowlistByWorkspaceRoot = {
+        ...(this.state.approvalCommandAllowlistByWorkspaceRoot || {}),
+        [normalizedWorkspaceRoot]: current,
+      };
+      this.save();
+    }
+    return current;
+  }
+
   getAvailableModelCatalog() {
     const raw = this.state.availableModelCatalog;
     if (!raw || typeof raw !== "object") {
@@ -165,6 +216,19 @@ function getThreadMap(binding) {
   return binding?.threadIdByWorkspaceRoot && typeof binding.threadIdByWorkspaceRoot === "object"
     ? binding.threadIdByWorkspaceRoot
     : {};
+}
+
+function normalizeCommandTokens(tokens) {
+  return Array.isArray(tokens)
+    ? tokens.map((part) => normalizeValue(part)).filter(Boolean)
+    : [];
+}
+
+function isSameTokenList(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
 }
 
 module.exports = { SessionStore };

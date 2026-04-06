@@ -83,6 +83,7 @@ function mapCodexMessageToRuntimeEvent(message) {
         requestId: message?.id != null ? String(message.id) : "",
         reason: normalizeString(params?.reason),
         command: extractApprovalDisplayCommand(params),
+        commandTokens: extractApprovalCommandTokens(params),
       },
     };
   }
@@ -104,6 +105,15 @@ function extractApprovalDisplayCommand(params) {
     return argv.join(" ");
   }
   return "";
+}
+
+function extractApprovalCommandTokens(params) {
+  const argv = Array.isArray(params?.argv) ? params.argv.filter((part) => typeof part === "string" && part.trim()) : [];
+  if (argv.length) {
+    return argv.map((part) => part.trim());
+  }
+  const command = extractApprovalDisplayCommand(params);
+  return command ? command.split(/\s+/).filter(Boolean) : [];
 }
 
 function normalizeString(value) {

@@ -82,15 +82,15 @@
 - `/status`
 - `/new`
 - `/stop`
+- `/switch <threadId>`
+- `/yes`
+- `/always`
+- `/no`
 
 ## 计划中的微信命令
 
 下一批考虑：
 
-- `/switch <threadId>`
-- `/yes`
-- `/always`
-- `/no`
 - `/model`
 - `/model <id>`
 - `/send <path>`

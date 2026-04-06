@@ -13,6 +13,7 @@ class CyberbossApp {
     this.threadStateStore = new ThreadStateStore();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
+      void this.handleRuntimeEvent(event);
     });
   }
 
@@ -144,13 +145,21 @@ class CyberbossApp {
       case "new":
         await this.handleNewCommand(normalized);
         return;
+      case "switch":
+        await this.handleSwitchCommand(normalized, command);
+        return;
       case "stop":
         await this.handleStopCommand(normalized);
+        return;
+      case "yes":
+      case "always":
+      case "no":
+        await this.handleApprovalCommand(normalized, command);
         return;
       default:
         await this.channelAdapter.sendText({
           userId: normalized.senderId,
-          text: "当前支持：/bind /绝对路径、/status、/new、/stop",
+          text: "当前支持：/bind /绝对路径、/status、/new、/switch <threadId>、/stop、/yes、/always、/no",
           contextToken: normalized.contextToken,
         });
     }
@@ -237,6 +246,32 @@ class CyberbossApp {
     });
   }
 
+  async handleSwitchCommand(normalized, command) {
+    const targetThreadId = normalizeCommandArgument(command.args);
+    if (!targetThreadId) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "用法：/switch <threadId>",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+      workspaceId: normalized.workspaceId,
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+    });
+    const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    await this.runtimeAdapter.resumeThread({ threadId: targetThreadId });
+    this.runtimeAdapter.getSessionStore().setThreadIdForWorkspace(bindingKey, workspaceRoot, targetThreadId);
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: `已切换线程。\n\nworkspace: ${workspaceRoot}\nthread: ${targetThreadId}`,
+      contextToken: normalized.contextToken,
+    });
+  }
+
   async handleStopCommand(normalized) {
     const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
       workspaceId: normalized.workspaceId,
@@ -266,9 +301,66 @@ class CyberbossApp {
     });
   }
 
+  async handleApprovalCommand(normalized, command) {
+    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+      workspaceId: normalized.workspaceId,
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+    });
+    const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
+    const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
+    const approval = threadState?.pendingApproval || null;
+    if (!threadId || !approval?.requestId) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "当前没有待处理的授权请求。",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const decision = command.name === "no" ? "decline" : "accept";
+    await this.runtimeAdapter.respondApproval({
+      requestId: approval.requestId,
+      decision,
+    });
+    if (command.name === "always" && decision === "accept") {
+      this.runtimeAdapter.getSessionStore().rememberApprovalPrefixForWorkspace(workspaceRoot, approval.commandTokens);
+    }
+    this.threadStateStore.resolveApproval(threadId, "running");
+    const text = command.name === "always"
+      ? "已记住该命令前缀，当前项目后续相同命令将自动放行。"
+      : (command.name === "yes" ? "已允许本次请求。" : "已拒绝本次请求。");
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text,
+      contextToken: normalized.contextToken,
+    });
+  }
+
   resolveWorkspaceRoot(bindingKey) {
     const sessionStore = this.runtimeAdapter.getSessionStore();
     return sessionStore.getActiveWorkspaceRoot(bindingKey) || this.config.workspaceRoot;
+  }
+
+  async handleRuntimeEvent(event) {
+    if (!event || event.type !== "runtime.approval.requested") {
+      return;
+    }
+    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(event.payload.threadId);
+    if (!linked?.workspaceRoot) {
+      return;
+    }
+    const allowlist = this.runtimeAdapter.getSessionStore().getApprovalCommandAllowlistForWorkspace(linked.workspaceRoot);
+    if (!matchesCommandPrefix(event.payload.commandTokens, allowlist)) {
+      return;
+    }
+    await this.runtimeAdapter.respondApproval({
+      requestId: event.payload.requestId,
+      decision: "accept",
+    }).catch(() => {});
+    this.threadStateStore.resolveApproval(event.payload.threadId, "running");
   }
 }
 
@@ -333,4 +425,23 @@ function normalizeWorkspacePath(value) {
 
 function isAbsoluteWorkspacePath(value) {
   return typeof value === "string" && value.startsWith("/");
+}
+
+function normalizeCommandArgument(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function matchesCommandPrefix(commandTokens, allowlist) {
+  const normalizedCommandTokens = Array.isArray(commandTokens)
+    ? commandTokens.map((part) => normalizeCommandArgument(part)).filter(Boolean)
+    : [];
+  if (!normalizedCommandTokens.length || !Array.isArray(allowlist) || !allowlist.length) {
+    return false;
+  }
+  return allowlist.some((prefix) => {
+    if (!Array.isArray(prefix) || !prefix.length || prefix.length > normalizedCommandTokens.length) {
+      return false;
+    }
+    return prefix.every((part, index) => normalizeCommandArgument(part) === normalizedCommandTokens[index]);
+  });
 }
