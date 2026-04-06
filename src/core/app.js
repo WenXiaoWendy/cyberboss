@@ -5,6 +5,7 @@ const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { buildWeixinHelpText } = require("./command-registry");
+const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
 
 class CyberbossApp {
@@ -14,6 +15,10 @@ class CyberbossApp {
     this.runtimeAdapter = createCodexRuntimeAdapter(config);
     this.timelineIntegration = createTimelineIntegration(config);
     this.threadStateStore = new ThreadStateStore();
+    this.streamDelivery = new StreamDelivery({
+      channelAdapter: this.channelAdapter,
+      sessionStore: this.runtimeAdapter.getSessionStore(),
+    });
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
       void this.handleRuntimeEvent(event);
@@ -98,6 +103,10 @@ class CyberbossApp {
       senderId: normalized.senderId,
     });
     const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    this.streamDelivery.setReplyTarget(bindingKey, {
+      userId: normalized.senderId,
+      contextToken: normalized.contextToken,
+    });
 
     await this.channelAdapter.sendTyping({
       userId: normalized.senderId,
@@ -117,10 +126,9 @@ class CyberbossApp {
           senderId: normalized.senderId,
         },
       });
-      await this.channelAdapter.sendText({
-        userId: normalized.senderId,
-        text: result.text,
-        contextToken: normalized.contextToken,
+      await this.streamDelivery.finishTurn({
+        threadId: result.threadId,
+        finalText: result.text,
       });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
@@ -475,6 +483,7 @@ class CyberbossApp {
   }
 
   async handleRuntimeEvent(event) {
+    await this.streamDelivery.handleRuntimeEvent(event);
     if (!event || event.type !== "runtime.approval.requested") {
       return;
     }
