@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 
 const { readConfig } = require("./core/config");
 const { CyberbossApp } = require("./core/app");
+const { buildTerminalHelpText } = require("./core/command-registry");
 
 function ensureDefaultStateDirectory() {
   fs.mkdirSync(path.join(os.homedir(), ".cyberboss"), { recursive: true });
@@ -27,16 +28,7 @@ function loadEnv() {
 }
 
 function printHelp() {
-  console.log(`
-用法: cyberboss <命令>
-
-命令:
-  login   发起微信扫码登录并保存 bot token
-  accounts  查看已保存的微信账号
-  start   启动当前选择的 channel / runtime 骨架
-  doctor  打印当前配置和已接入边界
-  help    显示帮助
-`);
+  console.log(buildTerminalHelpText());
 }
 
 async function main() {
