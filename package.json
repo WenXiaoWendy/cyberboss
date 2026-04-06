@@ -22,11 +22,17 @@
     "diary:write": "node ./bin/cyberboss.js diary write",
     "system:send": "node ./bin/cyberboss.js system send",
     "system:checkin": "node ./bin/cyberboss.js system checkin-poller",
+    "timeline:write": "node ./bin/cyberboss.js timeline write",
+    "timeline:build": "node ./bin/cyberboss.js timeline build",
+    "timeline:serve": "node ./bin/cyberboss.js timeline serve",
+    "timeline:dev": "node ./bin/cyberboss.js timeline dev",
+    "timeline:screenshot": "node ./bin/cyberboss.js timeline screenshot",
     "check": "node --check ./src/index.js && node --check ./src/core/config.js && node --check ./src/core/app.js && node --check ./src/core/thread-state-store.js && node --check ./src/core/stream-delivery.js && node --check ./src/core/command-registry.js && node --check ./src/core/system-message-queue-store.js && node --check ./src/core/system-message-dispatcher.js && node --check ./src/core/reminder-interpreter.js && node --check ./src/app/diary-write-cli.js && node --check ./src/app/reminder-write-cli.js && node --check ./src/app/system-send-cli.js && node --check ./src/app/system-checkin-poller.js && node --check ./src/adapters/channel/weixin/index.js && node --check ./src/adapters/channel/weixin/legacy.js && node --check ./src/adapters/channel/weixin/api.js && node --check ./src/adapters/channel/weixin/api-v2.js && node --check ./src/adapters/channel/weixin/login.js && node --check ./src/adapters/channel/weixin/account-store.js && node --check ./src/adapters/channel/weixin/context-token-store.js && node --check ./src/adapters/channel/weixin/message-utils.js && node --check ./src/adapters/channel/weixin/message-utils-v2.js && node --check ./src/adapters/channel/weixin/sync-buffer-store.js && node --check ./src/adapters/channel/weixin/media-mime.js && node --check ./src/adapters/channel/weixin/media-send.js && node --check ./src/adapters/channel/weixin/redact.js && node --check ./src/adapters/channel/weixin/reminder-queue-store.js && node --check ./src/adapters/runtime/codex/index.js && node --check ./src/adapters/runtime/codex/events.js && node --check ./src/adapters/runtime/codex/model-catalog.js && node --check ./src/adapters/runtime/codex/message-utils.js && node --check ./src/adapters/runtime/codex/rpc-client.js && node --check ./src/adapters/runtime/codex/session-store.js && node --check ./src/integrations/timeline/index.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
     "qrcode-terminal": "0.12.0",
+    "timeline-for-agent": "github:WenXiaoWendy/timeline-for-agent#main",
     "ws": "^8.19.0"
   }
 }

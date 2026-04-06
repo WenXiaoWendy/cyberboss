@@ -79,7 +79,17 @@ npm run system:send -- --text "系统消息"
 npm run system:checkin
 ```
 
-目前已接入 `reminder`、`diary`、`system` 这三组脚本；`timeline` 仍在后续接入。
+目前已接入 `reminder`、`diary`、`system`、`timeline` 这四组脚本。
+
+时间轴命令：
+
+```bash
+npm run timeline:write -- --date YYYY-MM-DD --stdin
+npm run timeline:build
+npm run timeline:serve
+npm run timeline:dev
+npm run timeline:screenshot
+```
 
 ### 3. 当前已接入的微信命令
 

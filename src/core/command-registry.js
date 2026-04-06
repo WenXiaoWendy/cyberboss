@@ -148,7 +148,7 @@ const COMMAND_GROUPS = [
         terminal: ["timeline write"],
         terminalGroup: "timeline",
         weixin: [],
-        status: "planned",
+        status: "active",
       },
       {
         action: "timeline.build",
@@ -156,7 +156,7 @@ const COMMAND_GROUPS = [
         terminal: ["timeline build"],
         terminalGroup: "timeline",
         weixin: [],
-        status: "planned",
+        status: "active",
       },
       {
         action: "timeline.serve",
@@ -164,7 +164,15 @@ const COMMAND_GROUPS = [
         terminal: ["timeline serve"],
         terminalGroup: "timeline",
         weixin: [],
-        status: "planned",
+        status: "active",
+      },
+      {
+        action: "timeline.dev",
+        summary: "启动时间轴热更新开发服务",
+        terminal: ["timeline dev"],
+        terminalGroup: "timeline",
+        weixin: [],
+        status: "active",
       },
       {
         action: "timeline.screenshot",
@@ -172,7 +180,7 @@ const COMMAND_GROUPS = [
         terminal: ["timeline screenshot"],
         terminalGroup: "timeline",
         weixin: [],
-        status: "planned",
+        status: "active",
       },
       {
         action: "reminder.create",
@@ -334,7 +342,7 @@ function buildTopicUsage(topic) {
     case "system":
       return "npm run system:send -- <args> / npm run system:checkin";
     case "timeline":
-      return "timeline 脚本接入中";
+      return "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot";
     default:
       return "npm run <script>";
   }
@@ -358,10 +366,15 @@ function toNpmRunExample(commandText) {
     case "system checkin-poller":
       return "npm run system:checkin";
     case "timeline write":
+      return "npm run timeline:write -- <args>";
     case "timeline build":
+      return "npm run timeline:build";
     case "timeline serve":
+      return "npm run timeline:serve";
+    case "timeline dev":
+      return "npm run timeline:dev";
     case "timeline screenshot":
-      return normalized;
+      return "npm run timeline:screenshot";
     default:
       return normalized;
   }

@@ -74,9 +74,13 @@
 
 ### timeline
 
-- `timeline` 相关脚本仍在接入中，暂不作为当前默认命令面展示。
+- `npm run timeline:write -- --date YYYY-MM-DD --stdin`
+- `npm run timeline:build`
+- `npm run timeline:serve`
+- `npm run timeline:dev`
+- `npm run timeline:screenshot`
 
-当前文档里列出的 `reminder / diary / system` 已可直接使用；`timeline` 仍是后续能力。
+当前文档里列出的 `reminder / diary / system / timeline` 都已可直接使用。
 
 ## 当前已接入的微信命令
 

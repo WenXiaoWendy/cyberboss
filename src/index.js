@@ -74,10 +74,18 @@ async function main() {
       await runSystemCheckinPoller(config);
       return;
     }
-    throw new Error(`命令尚未接入: cyberboss ${command} ${subcommand}`);
   }
 
   const app = new CyberbossApp(config);
+
+  if (command === "timeline") {
+    if (!subcommand || subcommand === "help") {
+      console.log(buildTerminalTopicHelp("timeline"));
+      return;
+    }
+    await app.timelineIntegration.runSubcommand(subcommand, argv.slice(2));
+    return;
+  }
 
   if (command === "doctor") {
     app.printDoctor();
