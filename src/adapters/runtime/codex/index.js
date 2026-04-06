@@ -106,6 +106,21 @@ function createCodexRuntimeAdapter(config) {
       await this.initialize();
       return runtimeClient.resumeThread({ threadId });
     },
+    async refreshThreadInstructions({ threadId, workspaceRoot, model = "" }) {
+      const runtimeClient = ensureClient();
+      await this.initialize();
+      const refreshText = buildInstructionRefreshText(config.weixinInstructionsFile);
+      await runtimeClient.resumeThread({ threadId });
+      const completion = waitForTurnCompletion(runtimeClient, threadId);
+      await runtimeClient.sendUserMessage({
+        threadId,
+        text: refreshText,
+        model,
+        workspaceRoot,
+      });
+      const result = await completion;
+      return { threadId, ...result };
+    },
     async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
@@ -224,6 +239,22 @@ function buildOpeningTurnText(instructionsFile, userText) {
     "",
     "Current user message:",
     normalizedText,
+  ].join("\n").trim();
+}
+
+function buildInstructionRefreshText(instructionsFile) {
+  const instructions = loadWechatInstructions(instructionsFile);
+  if (!instructions) {
+    return "Refresh your WeChat behavior for this existing thread. Reply in one short Chinese sentence confirming that you have updated your behavior for this thread.";
+  }
+  return [
+    "WECHAT SESSION INSTRUCTIONS REFRESH",
+    "Re-read and adopt the updated WeChat instructions below for the rest of this existing thread.",
+    "This is an internal refresh command, not a user-facing task.",
+    "Do not summarize the instructions back in detail.",
+    "Reply in one short Chinese sentence confirming that you have updated your behavior for this thread.",
+    "",
+    instructions,
   ].join("\n").trim();
 }
 
