@@ -34,14 +34,20 @@
 - `app.start`
 - `app.doctor`
 - `workspace.bind`
-- `workspace.where`
+- `workspace.status`
 - `thread.new`
+- `thread.switch`
 - `thread.stop`
-- `approval.accept`
-- `approval.reject`
+- `approval.accept_once`
+- `approval.accept_workspace`
+- `approval.reject_once`
+- `model.inspect`
+- `model.select`
+- `channel.send_file`
 - `timeline.write`
 - `reminder.create`
 - `diary.append`
+- `app.help`
 
 ### 2. 当前终端命令
 
@@ -62,11 +68,23 @@ node ./bin/cyberboss.js help
 当前还没开始接入微信命令面，计划先用短命令，而不是继续沿用 `/codex xxx`：
 
 - `/bind` -> `workspace.bind`
-- `/where` -> `workspace.where`
+- `/status` -> `workspace.status`
 - `/new` -> `thread.new`
+- `/switch <threadId>` -> `thread.switch`
 - `/stop` -> `thread.stop`
-- `/ok` -> `approval.accept`
-- `/no` -> `approval.reject`
+- `/yes` -> `approval.accept_once`
+- `/always` -> `approval.accept_workspace`
+- `/no` -> `approval.reject_once`
+- `/model` -> `model.inspect`
+- `/model <id>` -> `model.select`
+- `/send <path>` -> `channel.send_file`
+- `/help` -> `app.help`
+
+其中：
+
+- `/status` 会合并原先 `where` 和 `usage` 的职责
+- `/help` 保留
+- `/reread` 暂不保留，优先交给自然语言触发
 
 ### 4. 为什么要分层
 

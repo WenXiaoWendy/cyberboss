@@ -24,20 +24,26 @@
 ### 项目与线程
 
 - `workspace.bind`
-- `workspace.where`
+- `workspace.status`
 - `thread.new`
+- `thread.switch`
 - `thread.stop`
 
 ### 授权与控制
 
-- `approval.accept`
-- `approval.reject`
+- `approval.accept_once`
+- `approval.accept_workspace`
+- `approval.reject_once`
 
 ### 能力集成
 
+- `model.inspect`
+- `model.select`
+- `channel.send_file`
 - `timeline.write`
 - `reminder.create`
 - `diary.append`
+- `app.help`
 
 ## 当前终端命令
 
@@ -54,10 +60,21 @@
 第一批仅考虑：
 
 - `/bind`
-- `/where`
+- `/status`
 - `/new`
+- `/switch <threadId>`
 - `/stop`
-- `/ok`
+- `/yes`
+- `/always`
 - `/no`
+- `/model`
+- `/model <id>`
+- `/send <path>`
+- `/help`
 
-后续能力命令会再单独讨论，不直接照旧项目平移。
+说明：
+
+- `/status` 合并了原先 `where` 和 `usage` 的职责
+- `/help` 保留
+- `/reread` 先不做，自然语言触发即可
+- `/send` 保留，因为“模型能读文件”不等于“桥能把文件作为附件发回聊天”

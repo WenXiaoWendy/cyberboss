@@ -45,10 +45,10 @@ const COMMAND_GROUPS = [
         status: "planned",
       },
       {
-        action: "workspace.where",
-        summary: "查看当前项目、线程和运行态",
+        action: "workspace.status",
+        summary: "查看当前项目、线程、模型与上下文使用情况",
         terminal: [],
-        weixin: ["/where"],
+        weixin: ["/status"],
         status: "planned",
       },
       {
@@ -56,6 +56,13 @@ const COMMAND_GROUPS = [
         summary: "切到新线程草稿",
         terminal: [],
         weixin: ["/new"],
+        status: "planned",
+      },
+      {
+        action: "thread.switch",
+        summary: "切换到指定线程",
+        terminal: [],
+        weixin: ["/switch <threadId>"],
         status: "planned",
       },
       {
@@ -72,14 +79,21 @@ const COMMAND_GROUPS = [
     label: "授权与控制",
     actions: [
       {
-        action: "approval.accept",
-        summary: "允许当前待处理的授权请求",
+        action: "approval.accept_once",
+        summary: "允许当前待处理的授权请求一次",
         terminal: [],
-        weixin: ["/ok"],
+        weixin: ["/yes"],
         status: "planned",
       },
       {
-        action: "approval.reject",
+        action: "approval.accept_workspace",
+        summary: "在当前项目内持续允许同前缀命令",
+        terminal: [],
+        weixin: ["/always"],
+        status: "planned",
+      },
+      {
+        action: "approval.reject_once",
         summary: "拒绝当前待处理的授权请求",
         terminal: [],
         weixin: ["/no"],
@@ -91,6 +105,27 @@ const COMMAND_GROUPS = [
     id: "capabilities",
     label: "能力集成",
     actions: [
+      {
+        action: "model.inspect",
+        summary: "查看当前模型",
+        terminal: [],
+        weixin: ["/model"],
+        status: "planned",
+      },
+      {
+        action: "model.select",
+        summary: "切换到指定模型",
+        terminal: [],
+        weixin: ["/model <id>"],
+        status: "planned",
+      },
+      {
+        action: "channel.send_file",
+        summary: "将工作区文件发送回当前聊天",
+        terminal: [],
+        weixin: ["/send <path>"],
+        status: "planned",
+      },
       {
         action: "timeline.write",
         summary: "将当前上下文写入时间轴",
@@ -111,6 +146,13 @@ const COMMAND_GROUPS = [
         terminal: [],
         weixin: [],
         status: "planned",
+      },
+      {
+        action: "app.help",
+        summary: "查看当前通道可用命令",
+        terminal: ["help"],
+        weixin: ["/help"],
+        status: "active",
       },
     ],
   },
