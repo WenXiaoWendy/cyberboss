@@ -190,6 +190,13 @@ class CodexRpcClient {
     this.sendRaw(JSON.stringify({ method, params }));
   }
 
+  async sendResponse(id, result) {
+    if (id == null || id === "") {
+      throw new Error("Codex RPC response requires a non-empty id");
+    }
+    this.sendRaw(JSON.stringify({ id, result }));
+  }
+
   sendRaw(payload) {
     if (this.mode === "websocket") {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {

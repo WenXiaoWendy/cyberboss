@@ -77,6 +77,20 @@ function createCodexRuntimeAdapter(config) {
       readyState = null;
       client = null;
     },
+    async respondApproval({ requestId, decision }) {
+      const runtimeClient = ensureClient();
+      await this.initialize();
+      const normalizedRequestId = requestId == null ? "" : String(requestId).trim();
+      const normalizedDecision = decision === "accept" ? "accept" : "decline";
+      if (!normalizedRequestId) {
+        throw new Error("approval response requires a requestId");
+      }
+      await runtimeClient.sendResponse(normalizedRequestId, { decision: normalizedDecision });
+      return {
+        requestId: normalizedRequestId,
+        decision: normalizedDecision,
+      };
+    },
     async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {} }) {
       const runtimeClient = ensureClient();
       await this.initialize();
