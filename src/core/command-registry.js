@@ -138,7 +138,8 @@ const COMMAND_GROUPS = [
       {
         action: "channel.send_file",
         summary: "将文件作为附件发送回当前聊天",
-        terminal: [],
+        terminal: ["channel send-file"],
+        terminalGroup: "channel",
         weixin: [],
         status: "active",
       },
@@ -337,13 +338,45 @@ function formatTerminalExamples(action) {
 function buildTopicUsage(topic) {
   switch (topic) {
     case "reminder":
-      return "npm run reminder:write -- <args>";
+      return [
+        "npm run reminder:write -- <args>",
+        "",
+        "参数：",
+        "  --delay 30s|10m|1h30m|2d4h",
+        "  --at 2026-04-07T21:30+08:00 | 2026-04-07 21:30",
+        "  --text \"提醒内容\"",
+        "  --user <wechatUserId>  可选",
+      ].join("\n");
     case "diary":
-      return "npm run diary:write -- <args>";
+      return [
+        "npm run diary:write -- <args>",
+        "",
+        "参数：",
+        "  --text \"内容\"",
+        "  --title \"标题\"        只影响条目标题，不决定落到哪一天",
+        "  --date YYYY-MM-DD     决定写入哪个日记文件",
+        "  --time HH:mm          可选，覆盖条目时间",
+        "",
+        "示例：",
+        "  npm run diary:write -- --date 2026-04-06 --title \"4.6\" --text \"内容\"",
+      ].join("\n");
+    case "channel":
+      return [
+        "npm run channel:send-file -- --path /绝对路径 [--user <wechatUserId>]",
+        "",
+        "参数：",
+        "  --path /绝对路径         要发回当前微信聊天的本地文件",
+        "  --user <wechatUserId>   可选，覆盖默认接收用户",
+      ].join("\n");
     case "system":
       return "npm run system:send -- <args> / npm run system:checkin";
     case "timeline":
-      return "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot";
+      return [
+        "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / sh \"$CYBERBOSS_HOME/scripts/timeline-screenshot.sh\" --send",
+        "",
+        "补充：",
+        "  timeline 截图稳定入口是 timeline-screenshot.sh，它会把任务交给当前微信桥执行",
+      ].join("\n");
     default:
       return "npm run <script>";
   }
@@ -364,6 +397,8 @@ function toNpmRunExample(commandText) {
       return "npm run reminder:write -- <args>";
     case "diary write":
       return "npm run diary:write -- <args>";
+    case "channel send-file":
+      return "npm run channel:send-file -- --path /绝对路径";
     case "system send":
       return "npm run system:send -- <args>";
     case "system checkin-poller":
@@ -377,7 +412,7 @@ function toNpmRunExample(commandText) {
     case "timeline dev":
       return "npm run timeline:dev";
     case "timeline screenshot":
-      return "npm run timeline:screenshot";
+      return "sh \"$CYBERBOSS_HOME/scripts/timeline-screenshot.sh\" --send";
     default:
       return normalized;
   }

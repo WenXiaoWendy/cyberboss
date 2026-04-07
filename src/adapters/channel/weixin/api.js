@@ -5,7 +5,7 @@ const { redactSensitiveText } = require("./redact");
 
 function readChannelVersion() {
   try {
-    const pkgPath = path.resolve(__dirname, "../../../../../package.json");
+    const pkgPath = path.resolve(__dirname, "../../../../package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return pkg.version || "unknown";
   } catch {

@@ -7,6 +7,7 @@ const { SystemMessageQueueStore } = require("../core/system-message-queue-store"
 
 const DEFAULT_MIN_INTERVAL_MS = 3 * 60_000;
 const DEFAULT_MAX_INTERVAL_MS = 60 * 60_000;
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "判断是否要介入 %USER%。可沉默、发短微信、写日记、写入时间轴、调用米家MCP或用工具。没必要就 __SILENT__；若发微信，只输出那句。";
 
 async function runSystemCheckinPoller(config) {
   const account = resolveSelectedAccount(config);
@@ -92,7 +93,7 @@ function sleep(ms) {
 
 function buildCheckinTrigger(config) {
   const userName = normalizeText(config?.userName) || "用户";
-  return `判断是否要介入 ${userName}。可沉默、发短微信、写日记、写入时间轴、调用米家MCP或用工具。没必要就 __SILENT__；若发微信，只输出那句。`;
+  return INTERNAL_CHECKIN_TRIGGER_TEMPLATE.replace("%USER%", userName);
 }
 
 module.exports = { runSystemCheckinPoller };

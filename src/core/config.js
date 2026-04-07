@@ -25,6 +25,7 @@ function readConfig() {
     accountsDir: path.join(stateDir, "accounts"),
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
+    timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),
     weixinInstructionsFile: path.join(stateDir, "weixin-instructions.md"),
     diaryDir: path.join(stateDir, "diary"),
     syncBufferDir: path.join(stateDir, "sync-buffers"),

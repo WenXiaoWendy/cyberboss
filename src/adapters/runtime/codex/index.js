@@ -22,6 +22,7 @@ function createCodexRuntimeAdapter(config) {
         endpoint: config.codexEndpoint,
         codexCommand: config.codexCommand,
         env: process.env,
+        extraWritableRoots: [config.stateDir],
       });
     }
     return client;
@@ -84,14 +85,13 @@ function createCodexRuntimeAdapter(config) {
     async respondApproval({ requestId, decision }) {
       const runtimeClient = ensureClient();
       await this.initialize();
-      const normalizedRequestId = requestId == null ? "" : String(requestId).trim();
       const normalizedDecision = decision === "accept" ? "accept" : "decline";
-      if (!normalizedRequestId) {
+      if (requestId == null || String(requestId).trim() === "") {
         throw new Error("approval response requires a requestId");
       }
-      await runtimeClient.sendResponse(normalizedRequestId, { decision: normalizedDecision });
+      await runtimeClient.sendResponse(requestId, { decision: normalizedDecision });
       return {
-        requestId: normalizedRequestId,
+        requestId,
         decision: normalizedDecision,
       };
     },
@@ -148,80 +148,15 @@ function createCodexRuntimeAdapter(config) {
         });
       }
 
-      const completion = waitForTurnCompletion(runtimeClient, threadId);
       await runtimeClient.sendUserMessage({
         threadId,
         text: outboundText,
         model,
         workspaceRoot,
       });
-      const result = await completion;
-      return { threadId, ...result };
+      return { threadId };
     },
   };
-}
-
-function waitForTurnCompletion(client, threadId) {
-  return new Promise((resolve, reject) => {
-    let activeTurnId = "";
-    const itemOrder = [];
-    const completedTextByItemId = new Map();
-
-    const cleanup = () => {
-      unsubscribe();
-      clearTimeout(timer);
-    };
-
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error("codex turn timed out"));
-    }, 10 * 60_000);
-
-    const unsubscribe = client.onMessage((message) => {
-      const params = message?.params || {};
-      if (extractThreadIdFromParams(params) !== threadId) {
-        return;
-      }
-
-      if ((message?.method === "turn/started" || message?.method === "turn/start") && !activeTurnId) {
-        activeTurnId = extractTurnIdFromParams(params);
-        return;
-      }
-
-      if (isAssistantItemCompleted(message)) {
-        const itemId = typeof params?.item?.id === "string" ? params.item.id.trim() : `item-${itemOrder.length + 1}`;
-        if (!completedTextByItemId.has(itemId)) {
-          itemOrder.push(itemId);
-        }
-        const text = extractAssistantText(params);
-        completedTextByItemId.set(itemId, text);
-        return;
-      }
-
-      if (message?.method === "turn/failed") {
-        cleanup();
-        reject(new Error(extractFailureText(params)));
-        return;
-      }
-
-      if (message?.method === "turn/completed") {
-        const completedTurnId = extractTurnIdFromParams(params);
-        if (activeTurnId && completedTurnId && completedTurnId !== activeTurnId) {
-          return;
-        }
-        cleanup();
-        const text = itemOrder
-          .map((itemId) => completedTextByItemId.get(itemId) || "")
-          .filter(Boolean)
-          .join("\n\n")
-          .trim();
-        resolve({
-          turnId: completedTurnId || activeTurnId,
-          text: text || "已完成。",
-        });
-      }
-    });
-  });
 }
 
 function buildOpeningTurnText(instructionsFile, userText) {
@@ -271,3 +206,65 @@ function loadWechatInstructions(filePath) {
 }
 
 module.exports = { createCodexRuntimeAdapter };
+
+function waitForTurnCompletion(client, threadId) {
+  return new Promise((resolve, reject) => {
+    let activeTurnId = "";
+    const itemOrder = [];
+    const completedTextByItemId = new Map();
+
+    const cleanup = () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("codex turn timed out"));
+    }, 10 * 60_000);
+
+    const unsubscribe = client.onMessage((message) => {
+      const params = message?.params || {};
+      if (extractThreadIdFromParams(params) !== threadId) {
+        return;
+      }
+
+      if ((message?.method === "turn/started" || message?.method === "turn/start") && !activeTurnId) {
+        activeTurnId = extractTurnIdFromParams(params);
+        return;
+      }
+
+      if (isAssistantItemCompleted(message)) {
+        const itemId = typeof params?.item?.id === "string" ? params.item.id.trim() : `item-${itemOrder.length + 1}`;
+        if (!completedTextByItemId.has(itemId)) {
+          itemOrder.push(itemId);
+        }
+        completedTextByItemId.set(itemId, extractAssistantText(params));
+        return;
+      }
+
+      if (message?.method === "turn/failed") {
+        cleanup();
+        reject(new Error(extractFailureText(params)));
+        return;
+      }
+
+      if (message?.method === "turn/completed") {
+        const completedTurnId = extractTurnIdFromParams(params);
+        if (activeTurnId && completedTurnId && completedTurnId !== activeTurnId) {
+          return;
+        }
+        cleanup();
+        const text = itemOrder
+          .map((itemId) => completedTextByItemId.get(itemId) || "")
+          .filter(Boolean)
+          .join("\n\n")
+          .trim();
+        resolve({
+          turnId: completedTurnId || activeTurnId,
+          text: text || "已完成。",
+        });
+      }
+    });
+  });
+}

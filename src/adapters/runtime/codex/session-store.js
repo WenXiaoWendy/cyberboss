@@ -24,6 +24,7 @@ class SessionStore {
           ...parsed,
           bindings: parsed.bindings || {},
           approvalCommandAllowlistByWorkspaceRoot: parsed.approvalCommandAllowlistByWorkspaceRoot || {},
+          approvalPromptStateByThreadId: parsed.approvalPromptStateByThreadId || {},
           availableModelCatalog: parsed.availableModelCatalog || {
             models: [],
             updatedAt: "",
@@ -41,6 +42,13 @@ class SessionStore {
 
   getBinding(bindingKey) {
     return this.state.bindings[bindingKey] || null;
+  }
+
+  listBindings() {
+    return Object.entries(this.state.bindings || {}).map(([bindingKey, binding]) => ({
+      bindingKey,
+      ...(binding || {}),
+    }));
   }
 
   getActiveWorkspaceRoot(bindingKey) {
@@ -197,6 +205,54 @@ class SessionStore {
     return current;
   }
 
+  getApprovalPromptState(threadId) {
+    const normalizedThreadId = normalizeValue(threadId);
+    if (!normalizedThreadId) {
+      return null;
+    }
+    const raw = this.state.approvalPromptStateByThreadId?.[normalizedThreadId];
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    return {
+      requestId: normalizeValue(raw.requestId),
+      signature: normalizeValue(raw.signature),
+      promptedAt: normalizeValue(raw.promptedAt),
+    };
+  }
+
+  rememberApprovalPrompt(threadId, requestId, signature = "") {
+    const normalizedThreadId = normalizeValue(threadId);
+    const normalizedRequestId = normalizeValue(requestId);
+    const normalizedSignature = normalizeValue(signature);
+    if (!normalizedThreadId || !normalizedRequestId) {
+      return null;
+    }
+    this.state.approvalPromptStateByThreadId = {
+      ...(this.state.approvalPromptStateByThreadId || {}),
+      [normalizedThreadId]: {
+        requestId: normalizedRequestId,
+        signature: normalizedSignature,
+        promptedAt: new Date().toISOString(),
+      },
+    };
+    this.save();
+    return this.getApprovalPromptState(normalizedThreadId);
+  }
+
+  clearApprovalPrompt(threadId) {
+    const normalizedThreadId = normalizeValue(threadId);
+    if (!normalizedThreadId || !this.state.approvalPromptStateByThreadId?.[normalizedThreadId]) {
+      return;
+    }
+    const next = {
+      ...(this.state.approvalPromptStateByThreadId || {}),
+    };
+    delete next[normalizedThreadId];
+    this.state.approvalPromptStateByThreadId = next;
+    this.save();
+  }
+
   getAvailableModelCatalog() {
     const raw = this.state.availableModelCatalog;
     if (!raw || typeof raw !== "object") {
@@ -232,6 +288,7 @@ function createEmptyState() {
   return {
     bindings: {},
     approvalCommandAllowlistByWorkspaceRoot: {},
+    approvalPromptStateByThreadId: {},
     availableModelCatalog: {
       models: [],
       updatedAt: "",

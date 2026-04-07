@@ -86,7 +86,7 @@ function mapCodexMessageToRuntimeEvent(message) {
       type: "runtime.approval.requested",
       payload: {
         threadId,
-        requestId: message?.id != null ? String(message.id) : "",
+        requestId: message?.id ?? null,
         reason: normalizeString(params?.reason),
         command: extractApprovalDisplayCommand(params),
         commandTokens: extractApprovalCommandTokens(params),
@@ -124,24 +124,116 @@ function isApprovalRequestMethod(method) {
 }
 
 function extractApprovalDisplayCommand(params) {
-  const direct = normalizeString(params?.command);
-  if (direct) {
-    return direct;
+  const commandTokens = extractApprovalCommandTokens(params);
+  const direct = params?.command;
+  if (typeof direct === "string" && direct.trim()) {
+    return direct.trim();
   }
-  const argv = Array.isArray(params?.argv) ? params.argv.filter((part) => typeof part === "string" && part.trim()) : [];
-  if (argv.length) {
-    return argv.join(" ");
+  if (Array.isArray(direct)) {
+    const normalized = normalizeCommandTokens(direct);
+    if (normalized.length) {
+      return buildApprovalCommandPreview(normalized);
+    }
   }
-  return "";
+  return buildApprovalCommandPreview(commandTokens);
 }
 
 function extractApprovalCommandTokens(params) {
-  const argv = Array.isArray(params?.argv) ? params.argv.filter((part) => typeof part === "string" && part.trim()) : [];
-  if (argv.length) {
-    return argv.map((part) => part.trim());
+  return normalizeCommandTokens(extractTokens(params));
+}
+
+function extractTokens(value) {
+  if (!value) {
+    return [];
   }
-  const command = extractApprovalDisplayCommand(params);
-  return command ? command.split(/\s+/).filter(Boolean) : [];
+  if (Array.isArray(value)) {
+    return value.every((entry) => typeof entry === "string")
+      ? value.map((entry) => entry.trim()).filter(Boolean)
+      : [];
+  }
+  if (typeof value === "string") {
+    return splitCommandLine(value);
+  }
+  if (typeof value !== "object") {
+    return [];
+  }
+
+  for (const key of ["proposedExecpolicyAmendment", "argv", "args", "command", "cmd", "exec", "shellCommand", "script"]) {
+    const tokens = extractTokens(value[key]);
+    if (tokens.length) {
+      return tokens;
+    }
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey.includes("execpolicy") || normalizedKey.includes("exec_policy")) {
+      const tokens = extractTokens(nested);
+      if (tokens.length) {
+        return tokens;
+      }
+    }
+  }
+
+  return [];
+}
+
+function splitCommandLine(input) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let escaped = false;
+
+  for (const char of String(input || "")) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function buildApprovalCommandPreview(tokens) {
+  const normalized = normalizeCommandTokens(tokens);
+  if (!normalized.length) {
+    return "";
+  }
+  return normalized.map((token) => (token.includes(" ") ? JSON.stringify(token) : token)).join(" ");
+}
+
+function normalizeCommandTokens(tokens) {
+  return Array.isArray(tokens)
+    ? tokens.map((part) => normalizeString(part)).filter(Boolean)
+    : [];
 }
 
 function normalizeString(value) {

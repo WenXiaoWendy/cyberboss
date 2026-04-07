@@ -20,6 +20,9 @@ function createTimelineIntegration(config) {
       }
       return runTimelineCommand(binPath, [normalizedSubcommand, ...normalizeArgs(args)], {
         TIMELINE_FOR_AGENT_STATE_DIR: config.stateDir,
+        TIMELINE_FOR_AGENT_CHROME_PATH: resolveTimelineChromePath(),
+      }, {
+        subcommand: normalizedSubcommand,
       });
     },
   };
@@ -30,14 +33,29 @@ function resolveTimelineBinPath() {
   return path.join(path.dirname(packageJsonPath), "bin", "timeline-for-agent.js");
 }
 
-function runTimelineCommand(binPath, args, extraEnv = {}) {
+function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [binPath, ...args], {
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
       env: {
         ...process.env,
         ...extraEnv,
       },
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString("utf8");
+      stdout += text;
+      process.stdout.write(text);
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString("utf8");
+      stderr += text;
+      process.stderr.write(text);
     });
 
     child.once("error", reject);
@@ -49,6 +67,13 @@ function runTimelineCommand(binPath, args, extraEnv = {}) {
       if (code !== 0) {
         reject(new Error(`timeline 命令执行失败，退出码 ${code}`));
         return;
+      }
+      if (options.subcommand === "write") {
+        const failure = detectTimelineWriteFailure(stdout, stderr);
+        if (failure) {
+          reject(new Error(failure));
+          return;
+        }
       }
       resolve();
     });
@@ -65,6 +90,30 @@ function normalizeArgs(args) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveTimelineChromePath() {
+  const configured = normalizeText(process.env.TIMELINE_FOR_AGENT_CHROME_PATH)
+    || normalizeText(process.env.CYBERBOSS_SCREENSHOT_CHROME_PATH);
+  if (configured) {
+    return configured;
+  }
+  if (process.platform === "darwin") {
+    return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  }
+  return "";
+}
+
+function detectTimelineWriteFailure(stdout, stderr) {
+  const output = `${stdout}\n${stderr}`;
+  const statusMatch = output.match(/^\s*status:\s*(.+)\s*$/m);
+  const eventsMatch = output.match(/^\s*events:\s*(\d+)\s*$/m);
+  const status = normalizeText(statusMatch?.[1]);
+  const events = Number.parseInt(eventsMatch?.[1] || "", 10);
+  if (status === "missing" && Number.isFinite(events) && events <= 0) {
+    return "timeline write 没有写入任何事件；当前结果是 events: 0 且 status: missing。请检查是否真的传入了有效 JSON events。";
+  }
+  return "";
 }
 
 module.exports = { createTimelineIntegration };

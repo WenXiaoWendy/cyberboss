@@ -12,10 +12,11 @@ const CODEX_CLIENT_INFO = {
 };
 
 class CodexRpcClient {
-  constructor({ endpoint = "", env = process.env, codexCommand = "" }) {
+  constructor({ endpoint = "", env = process.env, codexCommand = "", extraWritableRoots = [] }) {
     this.endpoint = endpoint;
     this.env = env;
     this.codexCommand = codexCommand || resolveDefaultCodexCommand(env);
+    this.extraWritableRoots = normalizeWritableRoots(extraWritableRoots);
     this.mode = endpoint ? "websocket" : "spawn";
     this.socket = null;
     this.child = null;
@@ -128,6 +129,7 @@ class CodexRpcClient {
         effort,
         accessMode,
         workspaceRoot,
+        extraWritableRoots: this.extraWritableRoots,
       }))
       : this.sendRequest("thread/start", { input });
   }
@@ -320,13 +322,13 @@ function buildTurnInputPayload(text) {
   return normalizedText ? [{ type: "text", text: normalizedText }] : [];
 }
 
-function buildTurnStartParams({ threadId, input, model, effort, accessMode, workspaceRoot }) {
+function buildTurnStartParams({ threadId, input, model, effort, accessMode, workspaceRoot, extraWritableRoots = [] }) {
   const params = { threadId, input };
   const normalizedWorkspaceRoot = normalizeNonEmptyString(workspaceRoot);
   const normalizedModel = normalizeNonEmptyString(model);
   const normalizedEffort = normalizeNonEmptyString(effort);
   const normalizedAccessMode = normalizeAccessMode(accessMode);
-  const executionPolicies = buildExecutionPolicies(normalizedAccessMode, workspaceRoot);
+  const executionPolicies = buildExecutionPolicies(normalizedAccessMode, workspaceRoot, extraWritableRoots);
   if (normalizedWorkspaceRoot) {
     params.cwd = normalizedWorkspaceRoot;
   }
@@ -352,7 +354,7 @@ function normalizeAccessMode(value) {
   return normalized === "full-access" ? normalized : "";
 }
 
-function buildExecutionPolicies(accessMode, workspaceRoot) {
+function buildExecutionPolicies(accessMode, workspaceRoot, extraWritableRoots = []) {
   if (accessMode === "full-access") {
     return {
       approvalPolicy: "never",
@@ -360,7 +362,10 @@ function buildExecutionPolicies(accessMode, workspaceRoot) {
     };
   }
   const normalizedWorkspaceRoot = normalizeNonEmptyString(workspaceRoot);
-  const writableRoots = normalizedWorkspaceRoot ? [normalizedWorkspaceRoot] : [];
+  const writableRoots = normalizeWritableRoots([
+    normalizedWorkspaceRoot,
+    ...extraWritableRoots,
+  ]);
   const sandboxPolicy = writableRoots.length
     ? { type: "workspaceWrite", writableRoots, networkAccess: true }
     : { type: "workspaceWrite", networkAccess: true };
@@ -368,6 +373,20 @@ function buildExecutionPolicies(accessMode, workspaceRoot) {
     approvalPolicy: "on-request",
     sandboxPolicy,
   };
+}
+
+function normalizeWritableRoots(values) {
+  const roots = [];
+  const seen = new Set();
+  for (const value of values) {
+    const normalized = normalizeNonEmptyString(value);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    roots.push(normalized);
+  }
+  return roots;
 }
 
 module.exports = { CodexRpcClient };

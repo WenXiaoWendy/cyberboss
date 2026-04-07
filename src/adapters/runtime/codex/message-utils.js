@@ -16,28 +16,24 @@ function isAssistantItemCompleted(message) {
 }
 
 function extractAssistantText(params) {
-  const directText = [params?.delta, params?.item?.text];
+  const directText = [
+    params?.delta,
+    params?.item?.text,
+  ];
   for (const value of directText) {
     if (typeof value === "string" && value.length > 0) {
       return normalizeLineEndings(value);
     }
   }
 
-  const content = params?.item?.content || params?.content;
-  if (Array.isArray(content)) {
-    const parts = content
-      .map((entry) => {
-        if (typeof entry?.text === "string" && entry.text.trim()) {
-          return entry.text;
-        }
-        if (typeof entry?.value === "string" && entry.value.trim()) {
-          return entry.value;
-        }
-        return "";
-      })
-      .filter(Boolean);
-    if (parts.length) {
-      return normalizeLineEndings(parts.join("\n"));
+  const contentObjects = [
+    params?.item?.content,
+    params?.content,
+  ];
+  for (const content of contentObjects) {
+    const extracted = extractRawTextFromContent(content);
+    if (extracted) {
+      return extracted;
     }
   }
 
@@ -55,6 +51,52 @@ function normalizeIdentifier(value) {
 
 function normalizeLineEndings(value) {
   return String(value || "").replace(/\r\n/g, "\n");
+}
+
+function extractRawTextFromContent(content) {
+  if (typeof content === "string" && content.length > 0) {
+    return normalizeLineEndings(content);
+  }
+
+  if (!content) {
+    return "";
+  }
+
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const entry of content) {
+      if (typeof entry === "string" && entry.length > 0) {
+        parts.push(normalizeLineEndings(entry));
+        continue;
+      }
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const entryType = String(entry.type || "").toLowerCase();
+      if (entryType === "text" && typeof entry.text === "string" && entry.text.length > 0) {
+        parts.push(normalizeLineEndings(entry.text));
+        continue;
+      }
+      if (typeof entry.text === "string" && entry.text.length > 0) {
+        parts.push(normalizeLineEndings(entry.text));
+        continue;
+      }
+      if (typeof entry.value === "string" && entry.value.length > 0) {
+        parts.push(normalizeLineEndings(entry.value));
+      }
+    }
+    return parts.join("");
+  }
+
+  if (typeof content !== "object") {
+    return "";
+  }
+
+  if (typeof content.text === "string" && content.text.length > 0) {
+    return normalizeLineEndings(content.text);
+  }
+
+  return "";
 }
 
 module.exports = {

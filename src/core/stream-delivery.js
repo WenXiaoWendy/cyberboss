@@ -1,7 +1,3 @@
-const STREAM_INTERVAL_MS = 1500;
-const STREAM_MIN_DELTA_CHARS = 8;
-const STREAM_TAIL_BUFFER_CHARS = 8;
-
 class StreamDelivery {
   constructor({ channelAdapter, sessionStore }) {
     this.channelAdapter = channelAdapter;
@@ -17,6 +13,7 @@ class StreamDelivery {
     this.replyTargetByBindingKey.set(bindingKey, {
       userId: String(target.userId).trim(),
       contextToken: String(target.contextToken).trim(),
+      provider: normalizeText(target.provider),
     });
   }
 
@@ -25,6 +22,7 @@ class StreamDelivery {
     if (!threadId) {
       return;
     }
+
     const state = this.ensureThreadState(threadId);
     switch (event.type) {
       case "runtime.turn.started":
@@ -34,21 +32,22 @@ class StreamDelivery {
       case "runtime.reply.delta":
         this.upsertItem(state, {
           itemId: normalizeText(event.payload.itemId) || `item-${state.itemOrder.length + 1}`,
-          text: normalizeText(event.payload.text),
+          text: normalizeLineEndings(event.payload.text),
           completed: false,
         });
-        this.scheduleFlush(state);
         return;
       case "runtime.reply.completed":
         this.upsertItem(state, {
           itemId: normalizeText(event.payload.itemId) || `item-${state.itemOrder.length + 1}`,
-          text: normalizeText(event.payload.text),
+          text: normalizeLineEndings(event.payload.text),
           completed: true,
         });
-        this.scheduleFlush(state);
+        await this.flush(state, { force: false });
         return;
       case "runtime.turn.completed":
         state.turnId = normalizeText(event.payload.turnId) || state.turnId;
+        await this.flush(state, { force: true });
+        this.disposeThreadState(threadId);
         return;
       case "runtime.turn.failed":
         this.disposeThreadState(threadId);
@@ -60,10 +59,11 @@ class StreamDelivery {
 
   async finishTurn({ threadId, finalText }) {
     const normalizedThreadId = normalizeText(threadId);
-    const normalizedFinalText = normalizeText(finalText);
+    const normalizedFinalText = normalizeLineEndings(finalText);
     if (!normalizedThreadId || !normalizedFinalText) {
       return;
     }
+
     const state = this.ensureThreadState(normalizedThreadId);
     this.refreshBinding(state);
     if (!state.itemOrder.length) {
@@ -78,14 +78,12 @@ class StreamDelivery {
       for (const candidateId of state.itemOrder) {
         const item = state.items.get(candidateId);
         if (item) {
+          item.currentText = item.completedText || item.currentText;
           item.completed = true;
         }
       }
     }
-    if (state.timer) {
-      clearTimeout(state.timer);
-      state.timer = null;
-    }
+
     await this.flush(state, { force: true });
     this.disposeThreadState(normalizedThreadId);
   }
@@ -95,6 +93,7 @@ class StreamDelivery {
     if (existing) {
       return existing;
     }
+
     const created = {
       threadId,
       bindingKey: "",
@@ -103,10 +102,8 @@ class StreamDelivery {
       itemOrder: [],
       items: new Map(),
       sentText: "",
-      lastSentAt: 0,
-      timer: null,
       sendChain: Promise.resolve(),
-      streamingDisabled: false,
+      flushPromise: null,
     };
     this.stateByThreadId.set(threadId, created);
     this.refreshBinding(created);
@@ -132,15 +129,21 @@ class StreamDelivery {
     if (!state.items.has(itemId)) {
       state.itemOrder.push(itemId);
       state.items.set(itemId, {
-        text: "",
+        currentText: "",
+        completedText: "",
         completed: false,
       });
     }
+
     const current = state.items.get(itemId);
-    current.text = mergeText(current.text, text);
     if (completed) {
+      current.currentText = text;
+      current.completedText = text;
       current.completed = true;
+      return;
     }
+
+    current.currentText = appendStreamingText(current.currentText, text);
   }
 
   setItemText(state, itemId, text, completed) {
@@ -150,147 +153,185 @@ class StreamDelivery {
     if (!state.items.has(itemId)) {
       state.itemOrder.push(itemId);
       state.items.set(itemId, {
-        text: "",
+        currentText: "",
+        completedText: "",
         completed: false,
       });
     }
+
     const current = state.items.get(itemId);
-    current.text = text;
+    current.currentText = text;
+    if (completed) {
+      current.completedText = text;
+    }
     current.completed = Boolean(completed);
   }
 
-  scheduleFlush(state) {
-    if (!state.replyTarget || state.streamingDisabled) {
-      return;
-    }
-    if (state.timer) {
-      return;
-    }
-    const elapsed = Date.now() - state.lastSentAt;
-    const delay = state.lastSentAt ? Math.max(STREAM_INTERVAL_MS - elapsed, 200) : 300;
-    state.timer = setTimeout(() => {
-      state.timer = null;
-      void this.flush(state, { force: false });
-    }, delay);
+  async flush(state, { force }) {
+    const previous = state.flushPromise || Promise.resolve();
+    const current = previous
+      .catch(() => {})
+      .then(() => this.flushNow(state, { force }));
+    const tracked = current.finally(() => {
+      const latestState = this.stateByThreadId.get(state.threadId);
+      if (latestState && latestState.flushPromise === tracked) {
+        latestState.flushPromise = null;
+      }
+    });
+    state.flushPromise = tracked;
+    await tracked;
   }
 
-  async flush(state, { force }) {
-    if (!state.replyTarget || state.streamingDisabled) {
+  async flushNow(state, { force }) {
+    if (!state.replyTarget) {
       return;
     }
-    const stableText = buildStableText(state, { force });
-    if (!stableText) {
+
+    const plainText = markdownToPlainText(buildReplyText(state, { completedOnly: !force }));
+    if (!plainText || plainText === state.sentText) {
       return;
     }
-    if (state.sentText && !stableText.startsWith(state.sentText)) {
-      state.streamingDisabled = true;
+
+    if (state.sentText && !plainText.startsWith(state.sentText)) {
+      console.warn(`[cyberboss] skip non-monotonic reply thread=${state.threadId}`);
       return;
     }
-    const delta = stableText.slice(state.sentText.length);
+
+    const delta = plainText.slice(state.sentText.length);
     if (!delta) {
       return;
     }
-    if (!force && Array.from(delta).length < STREAM_MIN_DELTA_CHARS) {
-      this.scheduleFlush(state);
+
+    if (!delta.trim()) {
+      state.sentText = plainText;
       return;
     }
+
+    if (shouldSuppressSystemReply(state.replyTarget, plainText)) {
+      state.sentText = plainText;
+      console.log(`[cyberboss] suppressed system reply thread=${state.threadId} preview=${JSON.stringify(plainText.slice(0, 80))}`);
+      return;
+    }
+
+    state.sentText = plainText;
     state.sendChain = state.sendChain.then(async () => {
       await this.channelAdapter.sendText({
         userId: state.replyTarget.userId,
         text: delta,
         contextToken: state.replyTarget.contextToken,
       });
-      state.sentText = stableText;
-      state.lastSentAt = Date.now();
-    }).catch(() => {});
+    }).catch((error) => {
+      console.error(`[cyberboss] failed to deliver reply thread=${state.threadId}: ${error.message}`);
+    });
+
     await state.sendChain;
   }
 
   disposeThreadState(threadId) {
-    const state = this.stateByThreadId.get(threadId);
-    if (!state) {
-      return;
-    }
-    if (state.timer) {
-      clearTimeout(state.timer);
-    }
     this.stateByThreadId.delete(threadId);
   }
 }
 
-function buildStableText(state, { force }) {
+function buildReplyText(state, { completedOnly }) {
   const parts = [];
   for (const itemId of state.itemOrder) {
     const item = state.items.get(itemId);
-    if (!item?.text) {
+    if (!item) {
       continue;
     }
-    if (item.completed || force) {
-      parts.push(item.text.trim());
-      continue;
+
+    const sourceText = completedOnly
+      ? (item.completed ? item.completedText : "")
+      : (item.completed ? item.completedText : item.currentText);
+    const normalized = trimOuterBlankLines(sourceText);
+    if (normalized) {
+      parts.push(normalized);
     }
-    const stablePrefix = extractStablePrefix(item.text);
-    if (stablePrefix) {
-      parts.push(stablePrefix.trim());
-    }
-    break;
   }
-  return parts.filter(Boolean).join("\n\n").trim();
+  return parts.join("\n\n");
 }
 
-function extractStablePrefix(text) {
-  const value = normalizeText(text);
-  if (!value) {
-    return "";
-  }
-  const runes = Array.from(value);
-  if (runes.length <= STREAM_MIN_DELTA_CHARS) {
-    return "";
-  }
-  const cutoff = Math.max(0, runes.length - STREAM_TAIL_BUFFER_CHARS);
-  const candidate = runes.slice(0, cutoff).join("");
-  const boundaryIndex = findLastStableBoundary(candidate);
-  if (boundaryIndex <= 0) {
-    return "";
-  }
-  return candidate.slice(0, boundaryIndex).trim();
+function markdownToPlainText(text) {
+  let result = normalizeLineEndings(text);
+  result = result.replace(/```([^\n]*)\n?([\s\S]*?)```/g, (_, language, code) => {
+    const label = String(language || "").trim();
+    const body = indentBlock(String(code || ""));
+    return label ? `\n${label}:\n${body}\n` : `\n代码:\n${body}\n`;
+  });
+  result = result.replace(/```([^\n]*)\n?([\s\S]*)$/g, (_, language, code) => {
+    const label = String(language || "").trim();
+    const body = indentBlock(String(code || ""));
+    return label ? `\n${label}:\n${body}\n` : `\n代码:\n${body}\n`;
+  });
+  result = result.replace(/!\[[^\]]*]\([^)]*\)/g, "");
+  result = result.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  result = result.replace(/`([^`]+)`/g, "$1");
+  result = result.replace(/^#{1,6}\s*(.+)$/gm, "$1");
+  result = result.replace(/\*\*([^*]+)\*\*/g, "$1");
+  result = result.replace(/\*([^*]+)\*/g, "$1");
+  result = result.replace(/^>\s?/gm, "> ");
+  result = result.replace(/^\|[\s:|-]+\|$/gm, "");
+  result = result.replace(/^\|(.+)\|$/gm, (_, inner) =>
+    String(inner || "").split("|").map((cell) => cell.trim()).join("  ")
+  );
+  result = result.replace(/\n{3,}/g, "\n\n");
+  return trimOuterBlankLines(result);
 }
 
-function findLastStableBoundary(text) {
-  const matches = [...String(text || "").matchAll(/[\n。！？!?；;]\s*/g)];
-  if (!matches.length) {
-    return 0;
+function appendStreamingText(current, next) {
+  const base = String(current || "");
+  const incoming = String(next || "");
+  if (!incoming) {
+    return base;
   }
-  const last = matches[matches.length - 1];
-  return last.index + last[0].length;
-}
+  if (!base) {
+    return incoming;
+  }
+  if (base.endsWith(incoming)) {
+    return base;
+  }
+  if (incoming.startsWith(base)) {
+    return incoming;
+  }
 
-function mergeText(previous, incoming) {
-  const left = normalizeText(previous);
-  const right = normalizeText(incoming);
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-  if (right.startsWith(left)) {
-    return right;
-  }
-  if (left.startsWith(right)) {
-    return left;
-  }
-  const maxOverlap = Math.min(left.length, right.length);
+  const maxOverlap = Math.min(base.length, incoming.length);
   for (let size = maxOverlap; size > 0; size -= 1) {
-    if (left.slice(-size) === right.slice(0, size)) {
-      return left + right.slice(size);
+    if (base.slice(-size) === incoming.slice(0, size)) {
+      return `${base}${incoming.slice(size)}`;
     }
   }
-  return left + right;
+
+  return `${base}${incoming}`;
+}
+
+function indentBlock(text) {
+  const normalized = trimOuterBlankLines(normalizeLineEndings(text));
+  if (!normalized) {
+    return "";
+  }
+  return normalized.split("\n").map((line) => `    ${line}`).join("\n");
 }
 
 function normalizeText(value) {
-  return typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : "";
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeLineEndings(value) {
+  return String(value || "").replace(/\r\n/g, "\n");
+}
+
+function trimOuterBlankLines(text) {
+  return String(text || "")
+    .replace(/^\s*\n+/g, "")
+    .replace(/\n+\s*$/g, "");
+}
+
+function shouldSuppressSystemReply(replyTarget, plainReplyText) {
+  if (replyTarget?.provider !== "system") {
+    return false;
+  }
+  const normalized = normalizeText(plainReplyText);
+  return normalized === "__SILENT__" || normalized === "SILENT";
 }
 
 module.exports = { StreamDelivery };

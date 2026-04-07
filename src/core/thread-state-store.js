@@ -42,7 +42,7 @@ class ThreadStateStore {
       case "runtime.approval.requested":
         next.status = "waiting_approval";
         next.pendingApproval = {
-          requestId: event.payload.requestId || "",
+          requestId: event.payload.requestId ?? null,
           reason: event.payload.reason || "",
           command: event.payload.command || "",
           commandTokens: Array.isArray(event.payload.commandTokens) ? event.payload.commandTokens : [],

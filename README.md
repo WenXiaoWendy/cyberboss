@@ -67,6 +67,7 @@ npm run start
 npm run start:checkin
 npm run doctor
 npm run help
+npm run channel:send-file -- --path /绝对路径
 ```
 
 目前终端只把启动和诊断平铺在顶层，不把提醒、日记、时间轴继续堆成一排顶层命令。
@@ -75,13 +76,49 @@ npm run help
 
 ```bash
 npm run reminder:write -- --delay 30m --text "提醒内容"
+npm run reminder:write -- --delay 1h30m --text "提醒内容"
+npm run reminder:write -- --at "2026-04-07 21:30" --text "提醒内容"
 npm run diary:write -- --title 标题 --text "内容"
+npm run diary:write -- --date 2026-04-06 --title "4.6" --text "内容"
 npm run system:send -- --text "系统消息"
 ```
 
 `checkin` 现在更推荐跟随启动一起开，用 `npm run start:checkin`；单独的 `system:checkin` 仍保留作底层入口。
 
 目前已接入 `reminder`、`diary`、`system`、`timeline` 这四组脚本。
+
+其中日记命令要注意：
+
+- `--title` 只影响这条日记的小标题
+- `--date` 才决定写入哪个 `YYYY-MM-DD.md`
+- 如果你想把标题写成 `4.6`，同时又落到 `2026-04-06.md`，需要两个都传
+
+
+如果你想把微信里当前绑定的同一条 Codex 线程在本机终端继续打开，稳定流程是：
+
+```bash
+cd /Users/tingyiwen/Dev/cyberboss
+./scripts/start_shared_wechat.sh
+```
+
+保持这个终端不要退出。再开第二个终端执行：
+
+```bash
+cd /Users/tingyiwen/Dev/cyberboss
+./scripts/open_wechat_thread.sh
+```
+
+辅助诊断：
+
+- `./scripts/show_shared_status.sh` 用来检查共享 `app-server`、共享 `cyberboss` 和最近日志
+- `./scripts/open_shared_wechat_thread.sh` 现在只做前置检查和接入，不再偷偷启动后台 `cyberboss`
+
+禁止事项：
+
+- 不要单独执行 `node ./bin/cyberboss.js start --checkin`，除非已经明确设置 `CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765`
+- 不要让微信桥接走 `spawn` 私有 runtime；微信和终端必须同时连接同一个共享 `codex app-server`
+- 不要同时保留多套 `cyberboss` 进程；微信侧只应该有一条后台桥接链路
+- 不要把 `./scripts/start_shared_wechat.sh` 放到后台跑；它就是共享桥接主进程，必须保活在一个独立终端里
 
 时间轴命令：
 
@@ -90,10 +127,26 @@ npm run timeline:write -- --date YYYY-MM-DD --stdin
 npm run timeline:build
 npm run timeline:serve
 npm run timeline:dev
-npm run timeline:screenshot
+sh "$CYBERBOSS_HOME/scripts/timeline-screenshot.sh" --send
 ```
 
-其中 `npm run timeline:screenshot` 会先调用 `timeline-for-agent` 生成截图，再由当前微信桥直接发回聊天。
+其中截图的稳定入口是 `sh "$CYBERBOSS_HOME/scripts/timeline-screenshot.sh" --send`，它只负责把截图任务写进本地队列，再由正在运行的微信桥执行截图并发回聊天。
+
+如果要把本地已有文件直接发回当前微信聊天，使用：
+
+```bash
+npm run channel:send-file -- --path /绝对路径
+```
+
+可选参数：
+
+- `--user <wechatUserId>`：覆盖默认接收用户
+
+时间轴截图仍优先走它自己的稳定入口：
+
+```bash
+sh "$CYBERBOSS_HOME/scripts/timeline-screenshot.sh" --send
+```
 
 ### 3. 当前已接入的微信命令
 
@@ -128,6 +181,7 @@ npm run timeline:screenshot
 
 - `CYBERBOSS_STATE_DIR`
   - 默认：`${HOME}/.cyberboss`
+  - 这是本地状态目录，不是线程工作目录；微信线程和终端线程仍然应该开在你的项目目录里，不需要切到 `${HOME}`
 - `CYBERBOSS_USER_NAME`
   - 默认：`用户`
   - 用来替换默认文案、check-in 触发和本地 instructions 里的用户名
@@ -142,7 +196,7 @@ npm run timeline:screenshot
 - `CYBERBOSS_ACCOUNT_ID`
   - 多账号时指定当前使用的微信 bot 账号
 
-如果你不想在本地 instructions 和默认触发文案里继续用 `Wendy`，可以先设置：
+如果你不想在本地 instructions 和默认触发文案里继续用 `用户`，可以先设置：
 
 ```bash
 export CYBERBOSS_USER_NAME="你的名字"

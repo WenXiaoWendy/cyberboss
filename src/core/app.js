@@ -12,14 +12,9 @@ const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
 const { SystemMessageQueueStore } = require("./system-message-queue-store");
 const { SystemMessageDispatcher } = require("./system-message-dispatcher");
+const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
-const {
-  createReminderInterpreter,
-  formatDelayText,
-  looksLikeReminderIntent,
-  resolveReminderDueAtMs,
-} = require("./reminder-interpreter");
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -36,16 +31,23 @@ class CyberbossApp {
     this.timelineIntegration = createTimelineIntegration(config);
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
+    this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
     this.systemMessageDispatcher = null;
-    this.reminderInterpreter = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
       sessionStore: this.runtimeAdapter.getSessionStore(),
     });
+    this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
-      void this.handleRuntimeEvent(event);
+      this.runtimeEventChain = this.runtimeEventChain
+        .catch(() => {})
+        .then(() => this.handleRuntimeEvent(event))
+        .catch((error) => {
+          const message = error instanceof Error ? error.stack || error.message : String(error);
+          console.error(`[cyberboss] runtime event handling failed type=${event?.type || "(unknown)"} ${message}`);
+        });
     });
   }
 
@@ -69,6 +71,7 @@ class CyberbossApp {
 
   async start() {
     const account = this.channelAdapter.resolveAccount();
+    this.activeAccountId = account.accountId;
     this.systemMessageDispatcher = new SystemMessageDispatcher({
       queueStore: this.systemMessageQueue,
       config: this.config,
@@ -77,6 +80,7 @@ class CyberbossApp {
     const runtimeState = await this.runtimeAdapter.initialize();
     const knownContextTokens = Object.keys(this.channelAdapter.getKnownContextTokens()).length;
     const syncBuffer = this.channelAdapter.loadSyncBuffer();
+    await this.restoreBoundThreadSubscriptions();
 
     console.log("[cyberboss] bootstrap ok");
     console.log(`[cyberboss] channel=${this.channelAdapter.describe().id}`);
@@ -98,9 +102,6 @@ class CyberbossApp {
     }
 
     const shutdown = createShutdownController(async () => {
-      if (this.reminderInterpreter) {
-        await this.reminderInterpreter.close().catch(() => {});
-      }
       await this.runtimeAdapter.close();
     });
 
@@ -110,6 +111,7 @@ class CyberbossApp {
         try {
           await this.flushDueReminders(account);
           await this.flushPendingSystemMessages();
+          await this.flushPendingTimelineScreenshots(account);
           const response = await this.channelAdapter.getUpdates({
             syncBuffer: this.channelAdapter.loadSyncBuffer(),
             timeoutMs: this.resolveLongPollTimeoutMs(),
@@ -125,6 +127,7 @@ class CyberbossApp {
           }
           await this.flushDueReminders(account);
           await this.flushPendingSystemMessages();
+          await this.flushPendingTimelineScreenshots(account);
         } catch (error) {
           if (shutdown.stopped) {
             break;
@@ -145,32 +148,84 @@ class CyberbossApp {
     }
   }
 
-  async sendTimelineScreenshot(args = []) {
-    const senderId = this.resolveDefaultTerminalUser();
-    if (!senderId) {
+  async sendTimelineScreenshot({ senderId = "", args = [], outputFile = "" } = {}) {
+    const targetUserId = normalizeText(senderId) || this.resolveDefaultTerminalUser();
+    if (!targetUserId) {
       throw new Error("无法确定时间轴截图要发送给哪个微信用户，先配置 CYBERBOSS_ALLOWED_USER_IDS");
     }
-    const contextToken = this.channelAdapter.getKnownContextTokens()[senderId] || "";
+    const contextToken = this.channelAdapter.getKnownContextTokens()[targetUserId] || "";
     if (!contextToken) {
-      throw new Error(`找不到用户 ${senderId} 的 context token，先让这个用户和 bot 聊过一次`);
+      throw new Error(`找不到用户 ${targetUserId} 的 context token，先让这个用户和 bot 聊过一次`);
     }
 
     const normalizedArgs = Array.isArray(args)
       ? args.map((value) => String(value ?? "")).filter(Boolean)
       : [];
-    const outputFile = resolveTimelineScreenshotOutput(normalizedArgs);
-    const finalArgs = outputFile
+    const resolvedOutputFile = normalizeText(outputFile) || resolveTimelineScreenshotOutput(normalizedArgs);
+    const finalArgs = resolvedOutputFile
       ? normalizedArgs
       : [...normalizedArgs, "--output", path.join(os.tmpdir(), `cyberboss-timeline-${Date.now()}.png`)];
     const savedPath = resolveTimelineScreenshotOutput(finalArgs);
 
+    await this.channelAdapter.sendTyping({
+      userId: targetUserId,
+      status: 1,
+      contextToken,
+    }).catch(() => {});
     await this.timelineIntegration.runSubcommand("screenshot", finalArgs);
     await this.channelAdapter.sendFile({
-      userId: senderId,
+      userId: targetUserId,
       filePath: savedPath,
       contextToken,
     });
-    return { userId: senderId, filePath: savedPath };
+    await this.channelAdapter.sendTyping({
+      userId: targetUserId,
+      status: 0,
+      contextToken,
+    }).catch(() => {});
+    return { userId: targetUserId, filePath: savedPath };
+  }
+
+  async sendLocalFileToCurrentChat({ senderId = "", filePath = "" } = {}) {
+    const targetUserId = normalizeText(senderId) || this.resolveDefaultTerminalUser();
+    if (!targetUserId) {
+      throw new Error("无法确定文件要发送给哪个微信用户，先配置 CYBERBOSS_ALLOWED_USER_IDS");
+    }
+
+    const contextToken = this.channelAdapter.getKnownContextTokens()[targetUserId] || "";
+    if (!contextToken) {
+      throw new Error(`找不到用户 ${targetUserId} 的 context token，先让这个用户和 bot 聊过一次`);
+    }
+
+    const requestedPath = normalizeText(filePath);
+    if (!requestedPath) {
+      throw new Error("缺少要发送的文件路径");
+    }
+    const resolvedPath = path.resolve(requestedPath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`文件不存在: ${resolvedPath}`);
+    }
+    const stat = fs.statSync(resolvedPath);
+    if (!stat.isFile()) {
+      throw new Error(`只能发送文件，不能发送目录: ${resolvedPath}`);
+    }
+
+    await this.channelAdapter.sendTyping({
+      userId: targetUserId,
+      status: 1,
+      contextToken,
+    }).catch(() => {});
+    await this.channelAdapter.sendFile({
+      userId: targetUserId,
+      filePath: resolvedPath,
+      contextToken,
+    });
+    await this.channelAdapter.sendTyping({
+      userId: targetUserId,
+      status: 0,
+      contextToken,
+    }).catch(() => {});
+    return { userId: targetUserId, filePath: resolvedPath };
   }
 
   async handleIncomingMessage(message) {
@@ -191,9 +246,16 @@ class CyberbossApp {
   }
 
   async handlePreparedMessage(normalized, { allowCommands }) {
-    if (allowCommands && await this.tryHandleReminderIntent(normalized)) {
-      return;
-    }
+    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+      workspaceId: normalized.workspaceId,
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+    });
+    this.streamDelivery.setReplyTarget(bindingKey, {
+      userId: normalized.senderId,
+      contextToken: normalized.contextToken,
+      provider: normalized.provider,
+    });
 
     const command = parseChannelCommand(normalized.text);
     if (allowCommands && command) {
@@ -201,16 +263,8 @@ class CyberbossApp {
       return;
     }
 
-    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
-      workspaceId: normalized.workspaceId,
-      accountId: normalized.accountId,
-      senderId: normalized.senderId,
-    });
     const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
-    this.streamDelivery.setReplyTarget(bindingKey, {
-      userId: normalized.senderId,
-      contextToken: normalized.contextToken,
-    });
+    const codexInboundText = buildCodexInboundText(normalized);
 
     await this.channelAdapter.sendTyping({
       userId: normalized.senderId,
@@ -219,10 +273,10 @@ class CyberbossApp {
     }).catch(() => {});
 
     try {
-      const result = await this.runtimeAdapter.sendTextTurn({
+      await this.runtimeAdapter.sendTextTurn({
         bindingKey,
         workspaceRoot,
-        text: normalized.text,
+        text: codexInboundText,
         model: this.runtimeAdapter.getSessionStore().getCodexParamsForWorkspace(bindingKey, workspaceRoot).model,
         metadata: {
           workspaceId: normalized.workspaceId,
@@ -230,21 +284,11 @@ class CyberbossApp {
           senderId: normalized.senderId,
         },
       });
-      await this.streamDelivery.finishTurn({
-        threadId: result.threadId,
-        finalText: result.text,
-      });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
         text: `处理失败：${messageText}`,
-        contextToken: normalized.contextToken,
-      }).catch(() => {});
-    } finally {
-      await this.channelAdapter.sendTyping({
-        userId: normalized.senderId,
-        status: 0,
         contextToken: normalized.contextToken,
       }).catch(() => {});
     }
@@ -264,73 +308,36 @@ class CyberbossApp {
     }
   }
 
-  async tryHandleReminderIntent(normalized) {
-    if (!looksLikeReminderIntent(normalized.text)) {
-      return false;
+  async flushPendingTimelineScreenshots(account) {
+    const pendingJobs = this.timelineScreenshotQueue.drainForAccount(account.accountId);
+    for (const job of pendingJobs) {
+      try {
+        await this.sendTimelineScreenshot({
+          senderId: job.senderId,
+          args: job.args,
+          outputFile: job.outputFile,
+        });
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : String(error || "unknown error");
+        console.error(`[cyberboss] timeline screenshot failed job=${job.id} ${messageText}`);
+        await this.channelAdapter.sendTyping({
+          userId: job.senderId,
+          status: 0,
+        }).catch(() => {});
+        await this.channelAdapter.sendText({
+          userId: job.senderId,
+          text: `时间轴截图失败：${messageText}`,
+          preserveBlock: true,
+        }).catch(() => {});
+      }
     }
-
-    const parsed = await this.interpretReminderWithModel(normalized.text).catch(() => null);
-    if (!parsed || !parsed.schedule) {
-      return false;
-    }
-
-    const dueAtMs = resolveReminderDueAtMs(parsed);
-    if (!Number.isFinite(dueAtMs) || dueAtMs <= Date.now()) {
-      return false;
-    }
-
-    await this.createReminderFromInterpretation(normalized, {
-      dueAtMs,
-      text: parsed.message,
-    });
-    return true;
-  }
-
-  async ensureReminderInterpreter() {
-    if (this.reminderInterpreter) {
-      return this.reminderInterpreter;
-    }
-    const interpreter = createReminderInterpreter(this.config);
-    await interpreter.connect();
-    this.reminderInterpreter = interpreter;
-    return interpreter;
-  }
-
-  async interpretReminderWithModel(userText) {
-    const interpreter = await this.ensureReminderInterpreter();
-    return interpreter.interpret(userText);
-  }
-
-  async createReminderFromInterpretation(normalized, parsed) {
-    const contextToken = normalized.contextToken || this.channelAdapter.getKnownContextTokens()[normalized.senderId] || "";
-    if (!contextToken) {
-      await this.channelAdapter.sendText({
-        userId: normalized.senderId,
-        text: "当前缺少 context_token，暂时无法创建提醒。",
-        contextToken: normalized.contextToken,
-      }).catch(() => {});
-      return;
-    }
-
-    const reminder = this.reminderQueue.enqueue({
-      id: crypto.randomUUID(),
-      accountId: normalized.accountId,
-      senderId: normalized.senderId,
-      contextToken,
-      text: String(parsed.text || "").trim(),
-      dueAtMs: parsed.dueAtMs,
-      createdAt: new Date().toISOString(),
-    });
-
-    await this.channelAdapter.sendText({
-      userId: normalized.senderId,
-      text: `已加入提醒队列。\n\n时间: ${formatDelayText(reminder.dueAtMs - Date.now())} 后\n内容: ${reminder.text}`,
-      contextToken: normalized.contextToken,
-    }).catch(() => {});
   }
 
   resolveLongPollTimeoutMs() {
     if (this.systemMessageDispatcher?.hasPending()) {
+      return MIN_LONG_POLL_TIMEOUT_MS;
+    }
+    if (this.activeAccountId && this.timelineScreenshotQueue.hasPendingForAccount(this.activeAccountId)) {
       return MIN_LONG_POLL_TIMEOUT_MS;
     }
 
@@ -392,7 +399,7 @@ class CyberbossApp {
     const workspaceRoot = prepared.workspaceRoot || this.resolveWorkspaceRoot(bindingKey);
     const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
     const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
-    if (threadState?.status === "running" || threadState?.pendingApproval?.requestId) {
+    if (threadState?.status === "running" || hasRpcId(threadState?.pendingApproval?.requestId)) {
       return false;
     }
     await this.handlePreparedMessage(prepared, { allowCommands: false });
@@ -599,7 +606,7 @@ class CyberbossApp {
     const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
     const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
     const approval = threadState?.pendingApproval || null;
-    if (!threadId || !approval?.requestId) {
+    if (!threadId || approval?.requestId == null || String(approval.requestId).trim() === "") {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
         text: "当前没有待处理的授权请求。",
@@ -609,10 +616,17 @@ class CyberbossApp {
     }
 
     const decision = command.name === "no" ? "decline" : "accept";
+    console.log(
+      `[cyberboss] approval response requested thread=${threadId} requestId=${approval.requestId} decision=${decision} workspace=${workspaceRoot}`
+    );
     await this.runtimeAdapter.respondApproval({
       requestId: approval.requestId,
       decision,
     });
+    this.runtimeAdapter.getSessionStore().clearApprovalPrompt(threadId);
+    console.log(
+      `[cyberboss] approval response delivered thread=${threadId} requestId=${approval.requestId} decision=${decision}`
+    );
     if (command.name === "always" && decision === "accept") {
       this.runtimeAdapter.getSessionStore().rememberApprovalPrefixForWorkspace(workspaceRoot, approval.commandTokens);
     }
@@ -691,15 +705,46 @@ class CyberbossApp {
 
   async handleRuntimeEvent(event) {
     await this.streamDelivery.handleRuntimeEvent(event);
-    if (!event || event.type !== "runtime.approval.requested") {
+    if (!event) {
       return;
     }
-    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(event.payload.threadId);
+    if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
+      this.runtimeAdapter.getSessionStore().clearApprovalPrompt(event.payload.threadId);
+      await this.stopTypingForThread(event.payload.threadId);
+      if (event.type === "runtime.turn.failed") {
+        await this.sendFailureToThread(event.payload.threadId, event.payload.text || "执行失败");
+      }
+      return;
+    }
+    if (event.type !== "runtime.approval.requested") {
+      return;
+    }
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const linked = sessionStore.findBindingForThreadId(event.payload.threadId);
     if (!linked?.workspaceRoot) {
       return;
     }
-    const allowlist = this.runtimeAdapter.getSessionStore().getApprovalCommandAllowlistForWorkspace(linked.workspaceRoot);
-    if (!matchesCommandPrefix(event.payload.commandTokens, allowlist)) {
+    const allowlist = sessionStore.getApprovalCommandAllowlistForWorkspace(linked.workspaceRoot);
+    const shouldAutoApprove = matchesBuiltInCommandPrefix(event.payload.commandTokens)
+      || matchesCommandPrefix(event.payload.commandTokens, allowlist);
+    if (!shouldAutoApprove) {
+      const promptState = sessionStore.getApprovalPromptState(event.payload.threadId);
+      const promptSignature = buildApprovalPromptSignature(event.payload);
+      if (promptState?.signature && promptState.signature === promptSignature) {
+        sessionStore.rememberApprovalPrompt(event.payload.threadId, event.payload.requestId, promptSignature);
+        console.log(
+          `[cyberboss] approval prompt deduped thread=${event.payload.threadId} requestId=${event.payload.requestId}`
+        );
+        return;
+      }
+      sessionStore.rememberApprovalPrompt(event.payload.threadId, event.payload.requestId, promptSignature);
+      await this.sendApprovalPrompt({
+        bindingKey: linked.bindingKey,
+        approval: event.payload,
+      }).catch((error) => {
+        sessionStore.clearApprovalPrompt(event.payload.threadId);
+        throw error;
+      });
       return;
     }
     await this.runtimeAdapter.respondApproval({
@@ -707,6 +752,106 @@ class CyberbossApp {
       decision: "accept",
     }).catch(() => {});
     this.threadStateStore.resolveApproval(event.payload.threadId, "running");
+  }
+
+  async stopTypingForThread(threadId) {
+    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
+    const target = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
+    if (!target) {
+      return;
+    }
+    await this.channelAdapter.sendTyping({
+      userId: target.userId,
+      status: 0,
+      contextToken: target.contextToken,
+    }).catch(() => {});
+  }
+
+  async sendFailureToThread(threadId, text) {
+    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
+    const target = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
+    if (!target) {
+      return;
+    }
+    await this.channelAdapter.sendText({
+      userId: target.userId,
+      text: normalizeText(text) || "执行失败",
+      contextToken: target.contextToken,
+    }).catch(() => {});
+  }
+
+  async sendApprovalPrompt({ bindingKey, approval }) {
+    const target = this.resolveReplyTargetForBinding(bindingKey);
+    if (!target) {
+      console.warn(
+        `[cyberboss] approval prompt skipped binding=${bindingKey} requestId=${approval?.requestId || ""} reason=no_reply_target`
+      );
+      return;
+    }
+    console.log(
+      `[cyberboss] approval prompt sending binding=${bindingKey} user=${target.userId} requestId=${approval?.requestId || ""}`
+    );
+    await this.channelAdapter.sendTyping({
+      userId: target.userId,
+      status: 0,
+      contextToken: target.contextToken,
+    }).catch(() => {});
+    await this.channelAdapter.sendText({
+      userId: target.userId,
+      text: buildApprovalPromptText(approval),
+      contextToken: target.contextToken,
+      preserveBlock: true,
+    });
+    console.log(
+      `[cyberboss] approval prompt delivered binding=${bindingKey} user=${target.userId} requestId=${approval?.requestId || ""}`
+    );
+  }
+
+  async restoreBoundThreadSubscriptions() {
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const bindings = sessionStore.listBindings();
+    const seenThreadIds = new Set();
+
+    for (const binding of bindings) {
+      const bindingKey = normalizeText(binding?.bindingKey);
+      if (!bindingKey) {
+        continue;
+      }
+
+      const target = this.resolveReplyTargetForBinding(bindingKey);
+      if (target) {
+        this.streamDelivery.setReplyTarget(bindingKey, target);
+      }
+
+      const threadIdByWorkspaceRoot = binding?.threadIdByWorkspaceRoot && typeof binding.threadIdByWorkspaceRoot === "object"
+        ? binding.threadIdByWorkspaceRoot
+        : {};
+      for (const threadId of Object.values(threadIdByWorkspaceRoot)) {
+        const normalizedThreadId = normalizeCommandArgument(threadId);
+        if (!normalizedThreadId || seenThreadIds.has(normalizedThreadId)) {
+          continue;
+        }
+        seenThreadIds.add(normalizedThreadId);
+        await this.runtimeAdapter.resumeThread({ threadId: normalizedThreadId }).catch(() => {});
+      }
+    }
+  }
+
+  resolveReplyTargetForBinding(bindingKey) {
+    const binding = this.runtimeAdapter.getSessionStore().getBinding(bindingKey) || null;
+    const userId = normalizeCommandArgument(binding?.senderId);
+    if (!userId) {
+      return null;
+    }
+    const contextToken = this.channelAdapter.getKnownContextTokens()[userId] || "";
+    if (!contextToken) {
+      return null;
+    }
+    return {
+      userId,
+      contextToken,
+      provider: "weixin",
+    };
   }
 }
 
@@ -833,6 +978,10 @@ function normalizeCommandArgument(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function matchesCommandPrefix(commandTokens, allowlist) {
   const normalizedCommandTokens = Array.isArray(commandTokens)
     ? commandTokens.map((part) => normalizeCommandArgument(part)).filter(Boolean)
@@ -848,9 +997,223 @@ function matchesCommandPrefix(commandTokens, allowlist) {
   });
 }
 
+function matchesBuiltInCommandPrefix(commandTokens) {
+  const normalized = normalizeCommandTokensForMatching(commandTokens);
+  if (!normalized.length) {
+    return false;
+  }
+
+  if (normalized[0] === "npm") {
+    const runIndex = normalized.indexOf("run");
+    if (runIndex >= 0) {
+      const scriptName = normalizeCommandArgument(normalized[runIndex + 1]);
+      return isBuiltInScriptName(scriptName);
+    }
+  }
+
+  const executable = path.basename(normalized[0] || "");
+  if ((executable === "sh" || executable === "bash" || executable === "zsh")
+    && matchesBuiltInShellScript(normalized[1])) {
+    return true;
+  }
+  if (executable === "node" || executable === "node.exe") {
+    const binPath = normalizeCommandArgument(normalized[1]);
+    if (binPath === "./bin/cyberboss.js" || binPath.endsWith("/bin/cyberboss.js")) {
+      return matchesBuiltInCliCommand(normalized.slice(2));
+    }
+  }
+
+  if (executable === "cyberboss" || executable === "cyberboss.js") {
+    return matchesBuiltInCliCommand(normalized.slice(1));
+  }
+
+  return false;
+}
+
+function normalizeCommandTokensForMatching(commandTokens) {
+  const normalized = Array.isArray(commandTokens)
+    ? commandTokens.map((part) => normalizeCommandArgument(part)).filter(Boolean)
+    : [];
+  if (normalized.length >= 3 && isShellWrapper(normalized[0], normalized[1])) {
+    return splitCommandLine(normalized.slice(2).join(" "));
+  }
+  return normalized;
+}
+
+function isShellWrapper(command, flag) {
+  const executable = path.basename(normalizeCommandArgument(command));
+  return (executable === "sh" || executable === "bash" || executable === "zsh") && flag === "-lc";
+}
+
+function isBuiltInScriptName(scriptName) {
+  return scriptName === "reminder:write"
+    || scriptName === "diary:write"
+    || scriptName.startsWith("timeline:");
+}
+
+function matchesBuiltInShellScript(scriptPath) {
+  const basename = path.basename(normalizeCommandArgument(scriptPath));
+  return basename === "timeline-screenshot.sh";
+}
+
+function matchesBuiltInCliCommand(tokens) {
+  if (!Array.isArray(tokens) || tokens.length < 2) {
+    return false;
+  }
+  const topic = normalizeCommandArgument(tokens[0]);
+  const action = normalizeCommandArgument(tokens[1]);
+  if (topic === "timeline") {
+    return action === "write"
+      || action === "build"
+      || action === "serve"
+      || action === "dev"
+      || action === "screenshot"
+      || action === "read"
+      || action === "categories"
+      || action === "proposals";
+  }
+  return (topic === "reminder" && action === "write")
+    || (topic === "diary" && action === "write")
+    || false;
+}
+
+function splitCommandLine(input) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let escaped = false;
+
+  for (const char of String(input || "")) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function buildApprovalPromptText(approval) {
+  const reasonText = normalizeText(approval?.reason);
+  const commandText = normalizeText(approval?.command);
+  const sections = ["Codex 请求授权"];
+
+  if (reasonText && reasonText !== commandText) {
+    sections.push(`操作说明：\n${reasonText}`);
+  }
+
+  if (commandText) {
+    sections.push(`待执行命令：\n${commandText}`);
+  } else if (!reasonText) {
+    sections.push("(unknown)");
+  }
+
+  sections.push([
+    "回复以下命令继续：",
+    "/yes  本次允许",
+    "/always  本项目后续同前缀自动允许",
+    "/no  拒绝本次请求",
+  ].join("\n"));
+
+  return sections.join("\n\n");
+}
+
+function buildApprovalPromptSignature(approval) {
+  const reasonText = normalizeText(approval?.reason);
+  const commandText = normalizeText(approval?.command);
+  const commandTokens = Array.isArray(approval?.commandTokens)
+    ? approval.commandTokens.map((token) => normalizeCommandArgument(token)).filter(Boolean)
+    : [];
+  return JSON.stringify({
+    reason: reasonText,
+    command: commandText,
+    commandTokens,
+  });
+}
+
 function buildReminderSystemTrigger(reminder) {
   const reminderText = String(reminder?.text || "").trim();
-  return `这条 reminder 已到期。\n内容：${reminderText}`;
+  return [
+    "提醒到点了。",
+    "发一条自然简短的微信提醒。",
+    "别提内部触发，别机械复述原文。",
+    `内容：${reminderText}`,
+  ].join("\n");
+}
+
+function buildCodexInboundText(normalized) {
+  const text = String(normalized?.text || "").trim();
+  const localTime = formatWechatLocalTime(normalized?.receivedAt);
+  const lines = [];
+  if (localTime) {
+    lines.push(`[${localTime}]`);
+  }
+  if (text) {
+    if (lines.length) {
+      lines.push("");
+    }
+    lines.push(text);
+  }
+  return lines.join("\n").trim();
+}
+
+function formatWechatLocalTime(receivedAt) {
+  const value = typeof receivedAt === "string" ? receivedAt.trim() : "";
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(parsed).replace(/\//g, "-");
+}
+
+function stringifyRpcId(value) {
+  if (value == null) {
+    return "";
+  }
+  return String(value).trim();
+}
+
+function hasRpcId(value) {
+  return stringifyRpcId(value) !== "";
 }
 
 function resolveTimelineScreenshotOutput(args) {

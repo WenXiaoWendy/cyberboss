@@ -12,6 +12,7 @@ const DELAY_UNIT_MS = {
   h: 60 * 60_000,
   d: 24 * 60 * 60_000,
 };
+const LOCAL_TIMEZONE_OFFSET = "+08:00";
 
 async function runReminderWriteCommand(config) {
   const args = process.argv.slice(4);
@@ -21,9 +22,9 @@ async function runReminderWriteCommand(config) {
     throw new Error("提醒内容不能为空，传 --text 或通过 stdin 输入");
   }
 
-  const delayMs = parseDelay(options.delay);
-  if (!delayMs) {
-    throw new Error("缺少有效时长，使用 --delay 30s|10m|2h|1d");
+  const dueAtMs = resolveDueAtMs(options);
+  if (!Number.isFinite(dueAtMs) || dueAtMs <= Date.now()) {
+    throw new Error("缺少有效时间，使用 --delay 30s|10m|1h30m|2d4h20m 或 --at 2026-04-07T21:30+08:00");
   }
 
   const account = resolveSelectedAccount(config);
@@ -51,7 +52,7 @@ async function runReminderWriteCommand(config) {
     senderId,
     contextToken,
     text: body,
-    dueAtMs: Date.now() + delayMs,
+    dueAtMs,
     createdAt: new Date().toISOString(),
   });
   console.log(`reminder queued: ${reminder.id}`);
@@ -60,6 +61,7 @@ async function runReminderWriteCommand(config) {
 function parseArgs(args) {
   const options = {
     delay: "",
+    at: "",
     text: "",
     user: "",
     useStdin: false,
@@ -68,6 +70,11 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--delay") {
       options.delay = String(args[index + 1] || "");
+      index += 1;
+      continue;
+    }
+    if (arg === "--at") {
+      options.at = String(args[index + 1] || "");
       index += 1;
       continue;
     }
@@ -90,18 +97,87 @@ function parseArgs(args) {
   return options;
 }
 
+function resolveDueAtMs(options) {
+  const delayMs = parseDelay(options.delay);
+  const scheduledAtMs = parseAbsoluteTime(options.at);
+  if (delayMs && scheduledAtMs) {
+    throw new Error("--delay 和 --at 不能同时传");
+  }
+  if (delayMs) {
+    return Date.now() + delayMs;
+  }
+  if (scheduledAtMs) {
+    return scheduledAtMs;
+  }
+  return 0;
+}
+
 function parseDelay(rawValue) {
   const normalized = String(rawValue || "").trim().toLowerCase();
-  const match = normalized.match(/^(\d+)\s*([smhd])$/);
-  if (!match) {
+  if (!normalized) {
     return 0;
   }
-  const amount = Number.parseInt(match[1], 10);
-  const unitMs = DELAY_UNIT_MS[match[2]] || 0;
-  if (!Number.isFinite(amount) || amount <= 0 || !unitMs) {
+
+  let totalMs = 0;
+  let index = 0;
+  while (index < normalized.length) {
+    while (index < normalized.length && /\s/.test(normalized[index])) {
+      index += 1;
+    }
+    if (index >= normalized.length) {
+      break;
+    }
+
+    const match = normalized.slice(index).match(/^(\d+)\s*([smhd])/);
+    if (!match) {
+      return 0;
+    }
+
+    const amount = Number.parseInt(match[1], 10);
+    const unitMs = DELAY_UNIT_MS[match[2]] || 0;
+    if (!Number.isFinite(amount) || amount <= 0 || !unitMs) {
+      return 0;
+    }
+
+    totalMs += amount * unitMs;
+    index += match[0].length;
+  }
+
+  return totalMs > 0 ? totalMs : 0;
+}
+
+function parseAbsoluteTime(rawValue) {
+  const normalized = String(rawValue || "").trim();
+  if (!normalized) {
     return 0;
   }
-  return amount * unitMs;
+
+  const normalizedIso = normalizeAbsoluteTimeString(normalized);
+  const parsed = Date.parse(normalizedIso);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeAbsoluteTimeString(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  if (/([zZ]|[+-]\d{2}:\d{2})$/.test(normalized)) {
+    return normalized.replace(" ", "T");
+  }
+
+  const dateTimeMatch = normalized.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/);
+  if (dateTimeMatch) {
+    return `${dateTimeMatch[1]}T${dateTimeMatch[2]}${LOCAL_TIMEZONE_OFFSET}`;
+  }
+
+  const dateOnlyMatch = normalized.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[1]}T09:00:00${LOCAL_TIMEZONE_OFFSET}`;
+  }
+
+  return normalized;
 }
 
 async function resolveBody(options) {

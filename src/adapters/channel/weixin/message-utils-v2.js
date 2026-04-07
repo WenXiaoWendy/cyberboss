@@ -51,7 +51,7 @@ function createInboundFilter() {
         threadKey: normalizeText(message.session_id),
         text,
         contextToken: normalizeText(message.context_token),
-        receivedAt: new Date().toISOString(),
+        receivedAt: createdAtMs > 0 ? new Date(createdAtMs).toISOString() : new Date().toISOString(),
       };
     },
   };

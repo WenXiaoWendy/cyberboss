@@ -60,13 +60,29 @@
 
 为了避免继续把所有能力都平铺在顶层，后续命令会按能力分组：
 
+### channel
+
+- `npm run channel:send-file -- --path /绝对路径`
+
+说明：
+- 用来把本地已有文件直接发回当前微信聊天
+- 可选 `--user <wechatUserId>` 覆盖默认接收用户
+
 ### reminder
 
 - `npm run reminder:write -- --delay 30m --text "提醒内容"`
+- `npm run reminder:write -- --delay 1h30m --text "提醒内容"`
+- `npm run reminder:write -- --at "2026-04-07 21:30" --text "提醒内容"`
 
 ### diary
 
 - `npm run diary:write -- --title 标题 --text "内容"`
+- `npm run diary:write -- --date 2026-04-06 --title "4.6" --text "内容"`
+
+说明：
+- `--title` 只影响条目标题
+- `--date` 才决定写入哪个日记文件
+- `--time` 可选，用来覆盖条目时间
 
 ### system
 

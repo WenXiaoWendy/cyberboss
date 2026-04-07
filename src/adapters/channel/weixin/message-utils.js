@@ -30,7 +30,7 @@ function normalizeWeixinIncomingMessage(message, config, accountId) {
     threadKey: normalizeText(message.session_id),
     text,
     contextToken: normalizeText(message.context_token),
-    receivedAt: new Date().toISOString(),
+    receivedAt: resolveReceivedAt(message),
   };
 }
 
@@ -53,6 +53,18 @@ function extractTextBody(itemList) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveReceivedAt(message) {
+  const rawMs = Number(message?.create_time_ms);
+  if (Number.isFinite(rawMs) && rawMs > 0) {
+    return new Date(rawMs).toISOString();
+  }
+  const rawSeconds = Number(message?.create_time);
+  if (Number.isFinite(rawSeconds) && rawSeconds > 0) {
+    return new Date(rawSeconds * 1000).toISOString();
+  }
+  return new Date().toISOString();
 }
 
 module.exports = {

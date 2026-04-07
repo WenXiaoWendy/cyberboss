@@ -5,8 +5,11 @@ const dotenv = require("dotenv");
 
 const { readConfig } = require("./core/config");
 const { CyberbossApp } = require("./core/app");
+const { createTimelineIntegration } = require("./integrations/timeline");
 const { runDiaryWriteCommand } = require("./app/diary-write-cli");
 const { runReminderWriteCommand } = require("./app/reminder-write-cli");
+const { runChannelSendFileCommand } = require("./app/channel-send-file-cli");
+const { runTimelineScreenshotCommand } = require("./app/timeline-screenshot-cli");
 const { runSystemCheckinPoller } = require("./app/system-checkin-poller");
 const { runSystemSendCommand } = require("./app/system-send-cli");
 const {
@@ -45,13 +48,41 @@ function printHelp() {
   console.log(buildTerminalHelpText());
 }
 
+let runtimeErrorHooksInstalled = false;
+
+function installRuntimeErrorHooks() {
+  if (runtimeErrorHooksInstalled) {
+    return;
+  }
+  runtimeErrorHooksInstalled = true;
+
+  process.on("unhandledRejection", (reason) => {
+    const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
+    console.error(`[cyberboss] unhandled rejection ${message}`);
+  });
+
+  process.on("uncaughtException", (error) => {
+    const message = error instanceof Error ? error.stack || error.message : String(error);
+    console.error(`[cyberboss] uncaught exception ${message}`);
+    process.exitCode = 1;
+  });
+}
+
 async function main() {
   loadEnv();
   ensureRuntimeEnv();
+  installRuntimeErrorHooks();
   const argv = process.argv.slice(2);
   const config = readConfig();
   const command = config.mode || "help";
   const subcommand = argv[1] || "";
+  let app = null;
+  const getApp = () => {
+    if (!app) {
+      app = new CyberbossApp(config);
+    }
+    return app;
+  };
 
   if (command === "help" || command === "--help" || command === "-h") {
     const topicHelp = subcommand ? buildTerminalTopicHelp(subcommand) : "";
@@ -61,15 +92,25 @@ async function main() {
 
   if (isPlannedTerminalTopic(command)) {
     const topicHelp = buildTerminalTopicHelp(command);
+    const subcommandArgs = argv.slice(2);
+    const wantsSubcommandHelp = subcommandArgs.includes("--help") || subcommandArgs.includes("-h");
     if (subcommand === "help" || !subcommand) {
       console.log(topicHelp);
       return;
     }
     if (command === "diary" && subcommand === "write") {
+      if (wantsSubcommandHelp) {
+        console.log(topicHelp);
+        return;
+      }
       await runDiaryWriteCommand(config);
       return;
     }
     if (command === "reminder" && subcommand === "write") {
+      if (wantsSubcommandHelp) {
+        console.log(topicHelp);
+        return;
+      }
       await runReminderWriteCommand(config);
       return;
     }
@@ -81,40 +122,48 @@ async function main() {
       await runSystemCheckinPoller(config);
       return;
     }
+    if (command === "channel" && subcommand === "send-file") {
+      await runChannelSendFileCommand(getApp());
+      return;
+    }
   }
 
-  const app = new CyberbossApp(config);
-
   if (command === "timeline") {
+    const timelineIntegration = createTimelineIntegration(config);
     if (!subcommand || subcommand === "help") {
       console.log(buildTerminalTopicHelp("timeline"));
       return;
     }
     if (subcommand === "screenshot") {
-      await app.sendTimelineScreenshot(argv.slice(3));
+      const screenshotArgs = argv.slice(2);
+      if (screenshotArgs.includes("--help") || screenshotArgs.includes("-h")) {
+        await timelineIntegration.runSubcommand(subcommand, screenshotArgs);
+        return;
+      }
+      await runTimelineScreenshotCommand(config, argv.slice(2));
       return;
     }
-    await app.timelineIntegration.runSubcommand(subcommand, argv.slice(2));
+    await timelineIntegration.runSubcommand(subcommand, argv.slice(2));
     return;
   }
 
   if (command === "doctor") {
-    app.printDoctor();
+    getApp().printDoctor();
     return;
   }
 
   if (command === "login") {
-    await app.login();
+    await getApp().login();
     return;
   }
 
   if (command === "accounts") {
-    app.printAccounts();
+    getApp().printAccounts();
     return;
   }
 
   if (command === "start") {
-    await app.start();
+    await getApp().start();
     return;
   }
 
