@@ -25,6 +25,27 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "app.shared_start",
+        summary: "启动共享 app-server 与共享微信桥接",
+        terminal: ["shared start"],
+        weixin: [],
+        status: "active",
+      },
+      {
+        action: "app.shared_open",
+        summary: "接入当前微信绑定的共享线程",
+        terminal: ["shared open"],
+        weixin: [],
+        status: "active",
+      },
+      {
+        action: "app.shared_status",
+        summary: "查看共享 app-server 与共享桥接状态",
+        terminal: ["shared status"],
+        weixin: [],
+        status: "active",
+      },
+      {
         action: "app.doctor",
         summary: "打印当前配置、边界和线程状态",
         terminal: ["doctor"],
@@ -222,7 +243,8 @@ function buildTerminalHelpText() {
     "用法: npm run <script>",
     "",
     "当前终端命令：",
-    "  npm run start:checkin  启动主循环并同时开启 checkin 轮询",
+    "  npm run shared:start   默认启动共享 app-server 与共享微信桥接",
+    "  npm run shared:open    默认接入当前微信绑定的共享线程",
   ];
 
   for (const group of COMMAND_GROUPS) {
@@ -388,9 +410,12 @@ function toNpmRunExample(commandText) {
     case "login":
     case "accounts":
     case "start":
+    case "shared start":
+    case "shared open":
+    case "shared status":
     case "doctor":
     case "help":
-      return `npm run ${normalized}`;
+      return `npm run ${normalized.replace(" ", ":")}`;
     case "start --checkin":
       return "npm run start:checkin";
     case "reminder write":

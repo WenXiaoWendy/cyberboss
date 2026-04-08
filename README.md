@@ -161,20 +161,20 @@ CYBERBOSS_WEIXIN_ADAPTER=v2
   扫码登录微信，并把 bot 账号保存到本地
 - `npm run accounts`
   查看本地已保存的账号
-- `npm run start`
-  启动微信桥接
-- `npm run start:checkin`
-  启动微信桥接，并开启随机轮询唤醒
 - `npm run shared:start`
-  跨平台启动共享 `codex app-server` 和共享微信桥接；Windows / macOS / Linux 都优先用这个入口
+  默认启动方式。跨平台启动共享 `codex app-server` 和共享微信桥接；Windows / macOS / Linux 都优先用这个入口
 - `npm run shared:open`
-  跨平台接入当前微信绑定的那条共享线程
+  默认接管方式。跨平台接入当前微信绑定的那条共享线程
+- `npm run shared:status`
+  跨平台查看共享 `app-server`、共享桥接和 `readyz` 状态
 - `npm run doctor`
   查看当前配置、channel/runtime 边界和线程状态
 - `npm run help`
   查看可直接执行的命令入口
 
 这里的 `checkin` 指的就是“随机轮询唤醒”能力，不是固定整点提醒。
+
+`npm run start` / `npm run start:checkin` 可以用于本地最小链路调试，但不适合观察共享桥的真实行为，也不适合作为共享线程问题的默认排查入口。因此 README 只把共享模式作为默认入口。
 
 ### 用户在微信里会用到的命令
 
@@ -225,10 +225,11 @@ npm run shared:open
 
 辅助诊断：
 
-- `./scripts/show_shared_status.sh`（当前仍是 Unix shell 脚本，更适合 macOS / Linux）
+- `npm run shared:status`
 
 注意：
 
+- 共享启动就是默认启动方式；README 里的所有正常使用场景都默认建立在 `npm run shared:start` / `npm run shared:open` 之上
 - 不要单独执行 `node ./bin/cyberboss.js start --checkin`，除非已经明确设置 `CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765`
 - 不要让微信桥接走 `spawn` 私有 runtime；微信和终端必须连接同一个共享 `codex app-server`
 - 不要同时保留多套 `cyberboss` 进程
@@ -301,7 +302,7 @@ ${HOME}/.cyberboss
 - `npm run system:send -- --text "系统消息"`
   向内部系统队列写入一条不可见触发消息
 - `npm run system:checkin`
-  底层随机轮询入口，通常只用于调试；正常用户直接用 `npm run start:checkin`
+  底层随机轮询入口，通常只用于调试；正常用户直接用共享模式
 
 ### Agent 使用约定
 

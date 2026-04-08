@@ -51,8 +51,9 @@
 
 - `npm run login`
 - `npm run accounts`
-- `npm run start`
-- `npm run start:checkin`
+- `npm run shared:start`
+- `npm run shared:open`
+- `npm run shared:status`
 - `npm run doctor`
 - `npm run help`
 
@@ -90,7 +91,7 @@
 - `npm run system:checkin`
 
 说明：
-- `checkin` 更推荐跟随启动一起开：`npm run start:checkin`
+- `checkin` 更推荐跟随共享模式一起开：`npm run shared:start`
 - `system:checkin` 仅保留为底层轮询入口
 
 ### timeline

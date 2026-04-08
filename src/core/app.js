@@ -368,9 +368,9 @@ class CyberbossApp {
           `thread: ${normalizedThreadId}`,
           "优先检查：共享 app-server 是否正常、当前终端是否接在同一个 thread、runtime 是否真的开始处理这条消息。",
           "如果你正在帮用户排查，直接按这套顺序做：",
-          "1. 在项目目录执行 ./scripts/show_shared_status.sh",
-          "2. 如果 bridge 不在，先执行 ./scripts/start_shared_wechat.sh",
-          "3. 再开一个终端执行 ./scripts/open_wechat_thread.sh",
+          "1. 在项目目录执行 npm run shared:status",
+          "2. 如果 bridge 不在，先执行 npm run shared:start",
+          "3. 再开一个终端执行 npm run shared:open",
           "4. 确认 terminal 里打开的是上面这条 thread，而不是另一条私有线程",
         ].join("\n"),
       }).catch(() => {});
