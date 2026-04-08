@@ -1,3 +1,5 @@
+const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol-leak-monitor");
+
 class StreamDelivery {
   constructor({ channelAdapter, sessionStore }) {
     this.channelAdapter = channelAdapter;
@@ -224,32 +226,33 @@ class StreamDelivery {
     }
 
     const plainText = markdownToPlainText(buildReplyText(state, { completedOnly: !force }));
-    if (!plainText || plainText === state.sentText) {
+    const sanitized = sanitizeReplyText(state.replyTarget, plainText);
+    if (sanitized.suppress) {
+      state.sentText = sanitized.text;
+      console.log(`[cyberboss] suppressed system reply thread=${state.threadId} preview=${JSON.stringify(plainText.slice(0, 80))}`);
+      return;
+    }
+    const safeText = sanitized.text;
+    if (!safeText || safeText === state.sentText) {
       return;
     }
 
-    if (state.sentText && !plainText.startsWith(state.sentText)) {
+    if (state.sentText && !safeText.startsWith(state.sentText)) {
       console.warn(`[cyberboss] skip non-monotonic reply thread=${state.threadId}`);
       return;
     }
 
-    const delta = plainText.slice(state.sentText.length);
+    const delta = safeText.slice(state.sentText.length);
     if (!delta) {
       return;
     }
 
     if (!delta.trim()) {
-      state.sentText = plainText;
+      state.sentText = safeText;
       return;
     }
 
-    if (shouldSuppressSystemReply(state.replyTarget, plainText)) {
-      state.sentText = plainText;
-      console.log(`[cyberboss] suppressed system reply thread=${state.threadId} preview=${JSON.stringify(plainText.slice(0, 80))}`);
-      return;
-    }
-
-    state.sentText = plainText;
+    state.sentText = safeText;
     state.sendChain = state.sendChain.then(async () => {
       await this.channelAdapter.sendText({
         userId: state.replyTarget.userId,
@@ -387,6 +390,9 @@ function shouldSuppressSystemReply(replyTarget, plainReplyText) {
   if (compact === "CB_SILENT" || compact === "__SILENT__" || compact === "SILENT") {
     return true;
   }
+  if (containsStructuredSilentSignal(normalized)) {
+    return true;
+  }
   if (compact.toUpperCase().includes("CB_SILENT") || compact.toUpperCase().includes("__SILENT__")) {
     return true;
   }
@@ -399,11 +405,51 @@ function shouldSuppressSystemReply(replyTarget, plainReplyText) {
     .some((line) => line === "CB_SILENT" || line === "__SILENT__" || line === "SILENT");
 }
 
+function sanitizeReplyText(replyTarget, plainReplyText) {
+  const normalized = normalizeLineEndings(String(plainReplyText || ""));
+  if (!normalized) {
+    return { suppress: false, text: "" };
+  }
+  const protocolSanitized = sanitizeProtocolLeakText(normalized);
+  const safeText = protocolSanitized.text || "";
+  if (shouldSuppressSystemReply(replyTarget, safeText)) {
+    return { suppress: true, text: "" };
+  }
+  const cleaned = stripSilentSentinelArtifacts(safeText);
+  return {
+    suppress: false,
+    text: trimOuterBlankLines(cleaned),
+  };
+}
+
 function normalizeSilentSentinelText(value) {
   return String(value || "")
     .normalize("NFKC")
     .toUpperCase()
     .replace(/[^A-Z_]/g, "");
+}
+
+function stripSilentSentinelArtifacts(value) {
+  return normalizeLineEndings(String(value || ""))
+    .replace(/\{\s*"cyberboss_action"\s*:\s*"silent"\s*\}/gi, "")
+    .split("\n")
+    .map((line) => {
+      const parts = line.split(/\s+/);
+      const kept = parts.filter((part) => !isSilentSentinelToken(part));
+      return kept.join(" ").trim();
+    })
+    .filter((line, index, lines) => line || (index > 0 && index < lines.length - 1))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function isSilentSentinelToken(value) {
+  const normalized = normalizeSilentSentinelText(value);
+  return normalized === "CB_SILENT" || normalized === "__SILENT__" || normalized === "SILENT";
+}
+
+function containsStructuredSilentSignal(value) {
+  return /\{\s*"cyberboss_action"\s*:\s*"silent"\s*\}/i.test(String(value || ""));
 }
 
 module.exports = { StreamDelivery };
