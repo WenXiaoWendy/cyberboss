@@ -1,9 +1,13 @@
 const crypto = require("crypto");
 const { listWeixinAccounts, resolveSelectedAccount } = require("./account-store");
 const { loadPersistedContextTokens, persistContextToken } = require("./context-token-store");
-const { runLoginFlow } = require("./login");
-const { getConfig, sendTyping } = require("./api");
-const { getUpdatesV2, sendTextV2 } = require("./api-v2");
+const { runV2LoginFlow } = require("./login-v2");
+const {
+  getConfigV2,
+  getUpdatesV2,
+  sendTextV2,
+  sendTypingV2,
+} = require("./api-v2");
 const { createLegacyWeixinChannelAdapter } = require("./legacy");
 const { createInboundFilter } = require("./message-utils-v2");
 const { sendWeixinMediaFile } = require("./media-send");
@@ -89,6 +93,8 @@ function createWeixinChannelAdapter(config) {
         return sendTextV2({
           baseUrl: account.baseUrl,
           token: account.token,
+          routeTag: account.routeTag,
+          clientVersion: config.weixinProtocolClientVersion,
           toUserId: userId,
           text: compactChunk,
           contextToken: resolvedToken,
@@ -113,10 +119,12 @@ function createWeixinChannelAdapter(config) {
         baseUrl: config.weixinBaseUrl,
         accountsDir: config.accountsDir,
         syncBufferDir: config.syncBufferDir,
+        protocolClientVersion: config.weixinProtocolClientVersion,
+        routeTag: config.weixinRouteTag,
       };
     },
     async login() {
-      await runLoginFlow(config);
+      await runV2LoginFlow(config);
     },
     printAccounts() {
       const accounts = listWeixinAccounts(config);
@@ -129,6 +137,9 @@ function createWeixinChannelAdapter(config) {
         console.log(`- ${account.accountId}`);
         console.log(`  userId: ${account.userId || "(unknown)"}`);
         console.log(`  baseUrl: ${account.baseUrl || config.weixinBaseUrl}`);
+        if (account.routeTag) {
+          console.log(`  routeTag: ${account.routeTag}`);
+        }
         console.log(`  savedAt: ${account.savedAt || "(unknown)"}`);
       }
     },
@@ -154,6 +165,8 @@ function createWeixinChannelAdapter(config) {
         token: account.token,
         getUpdatesBuf: syncBuffer,
         timeoutMs,
+        routeTag: account.routeTag,
+        clientVersion: config.weixinProtocolClientVersion,
       });
       if (typeof response?.get_updates_buf === "string" && response.get_updates_buf.trim()) {
         this.saveSyncBuffer(response.get_updates_buf.trim());
@@ -181,9 +194,11 @@ function createWeixinChannelAdapter(config) {
       if (!resolvedToken) {
         return;
       }
-      const configResponse = await getConfig({
+      const configResponse = await getConfigV2({
         baseUrl: account.baseUrl,
         token: account.token,
+        routeTag: account.routeTag,
+        clientVersion: config.weixinProtocolClientVersion,
         ilinkUserId: userId,
         contextToken: resolvedToken,
       }).catch(() => null);
@@ -193,9 +208,11 @@ function createWeixinChannelAdapter(config) {
       if (!typingTicket) {
         return;
       }
-      await sendTyping({
+      await sendTypingV2({
         baseUrl: account.baseUrl,
         token: account.token,
+        routeTag: account.routeTag,
+        clientVersion: config.weixinProtocolClientVersion,
         body: {
           ilink_user_id: userId,
           typing_ticket: typingTicket,
@@ -216,6 +233,9 @@ function createWeixinChannelAdapter(config) {
         baseUrl: account.baseUrl,
         token: account.token,
         cdnBaseUrl: config.weixinCdnBaseUrl,
+        apiVariant: "v2",
+        routeTag: account.routeTag,
+        clientVersion: config.weixinProtocolClientVersion,
       });
     },
   };

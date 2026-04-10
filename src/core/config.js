@@ -23,6 +23,8 @@ function readConfig() {
     weixinCdnBaseUrl: readTextEnv("CYBERBOSS_WEIXIN_CDN_BASE_URL") || "https://novac2c.cdn.weixin.qq.com/c2c",
     weixinAdapterVariant: readTextEnv("CYBERBOSS_WEIXIN_ADAPTER") || "v2",
     weixinQrBotType: readTextEnv("CYBERBOSS_WEIXIN_QR_BOT_TYPE") || "3",
+    weixinRouteTag: readTextEnv("CYBERBOSS_WEIXIN_ROUTE_TAG"),
+    weixinProtocolClientVersion: readTextEnv("CYBERBOSS_WEIXIN_PROTOCOL_CLIENT_VERSION") || "2.1.1",
     accountsDir: path.join(stateDir, "accounts"),
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),

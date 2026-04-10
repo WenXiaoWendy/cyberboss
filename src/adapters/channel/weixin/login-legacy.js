@@ -1,19 +1,13 @@
-const qrcodeTerminal = require("qrcode-terminal");
-const {
-  deleteWeixinAccount,
-  listWeixinAccounts,
-  saveWeixinAccount,
-} = require("./account-store");
-const { clearPersistedContextTokens } = require("./context-token-store");
 const { redactSensitiveText } = require("./redact");
+const {
+  ACTIVE_LOGIN_TTL_MS,
+  MAX_QR_REFRESH_COUNT,
+  ensureTrailingSlash,
+  finishWeixinLogin,
+  printQrCode,
+} = require("./login-common");
 
-const ACTIVE_LOGIN_TTL_MS = 5 * 60_000;
 const QR_LONG_POLL_TIMEOUT_MS = 35_000;
-const MAX_QR_REFRESH_COUNT = 3;
-
-function ensureTrailingSlash(url) {
-  return url.endsWith("/") ? url : `${url}/`;
-}
 
 async function fetchQrCode(apiBaseUrl, botType) {
   const base = ensureTrailingSlash(apiBaseUrl);
@@ -53,35 +47,7 @@ async function pollQrStatus(apiBaseUrl, qrcode) {
   }
 }
 
-function printQrCode(url) {
-  try {
-    qrcodeTerminal.generate(url, { small: true });
-    console.log("如果二维码未能成功展示，请用浏览器打开以下链接扫码：");
-    console.log(url);
-  } catch {
-    console.log(url);
-  }
-}
-
-function cleanupStaleAccountsForUserId(config, activeAccount) {
-  const activeUserId = typeof activeAccount?.userId === "string" ? activeAccount.userId.trim() : "";
-  if (!activeUserId) {
-    return [];
-  }
-  const staleAccounts = listWeixinAccounts(config).filter((account) => (
-    account.accountId !== activeAccount.accountId
-    && typeof account.userId === "string"
-    && account.userId.trim() === activeUserId
-  ));
-  for (const staleAccount of staleAccounts) {
-    deleteWeixinAccount(config, staleAccount.accountId);
-    clearPersistedContextTokens(config, staleAccount.accountId);
-    console.log(`[cyberboss] removed stale account ${staleAccount.accountId} for userId ${activeUserId}`);
-  }
-  return staleAccounts;
-}
-
-async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
+async function waitForLegacyWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
   let qrResponse = await fetchQrCode(apiBaseUrl, botType);
   let startedAt = Date.now();
   let scannedPrinted = false;
@@ -136,6 +102,7 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
           token: statusResponse.bot_token,
           baseUrl: statusResponse.baseurl || apiBaseUrl,
           userId: statusResponse.ilink_user_id || "",
+          routeTag: "",
         };
       default:
         break;
@@ -144,19 +111,14 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
   throw new Error("登录超时，请重新执行 login");
 }
 
-async function runLoginFlow(config) {
-  console.log("[cyberboss] 正在启动微信扫码登录...");
-  const result = await waitForWeixinLogin({
+async function runLegacyLoginFlow(config) {
+  console.log("[cyberboss] 正在启动微信扫码登录（legacy）...");
+  const result = await waitForLegacyWeixinLogin({
     apiBaseUrl: config.weixinBaseUrl,
     botType: config.weixinQrBotType,
     timeoutMs: 480_000,
   });
-  const account = saveWeixinAccount(config, result.accountId, result);
-  cleanupStaleAccountsForUserId(config, account);
-  console.log("\n✅ 与微信连接成功！");
-  console.log(`accountId: ${account.accountId}`);
-  console.log(`userId: ${account.userId || "(unknown)"}`);
-  console.log(`baseUrl: ${account.baseUrl}`);
+  finishWeixinLogin(config, result);
 }
 
-module.exports = { runLoginFlow };
+module.exports = { runLegacyLoginFlow };

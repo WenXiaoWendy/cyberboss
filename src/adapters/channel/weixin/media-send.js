@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs/promises");
 
 const { getUploadUrl, sendMessage } = require("./api");
+const { getUploadUrlV2, sendMessageV2 } = require("./api-v2");
 const { getMimeFromFilename } = require("./media-mime");
 
 const WEIXIN_MEDIA_TYPE = {
@@ -43,7 +44,7 @@ async function uploadBufferToCdn({ buf, uploadParam, filekey, cdnBaseUrl, aeskey
   return { downloadParam };
 }
 
-async function uploadMediaToWeixin({ filePath, toUserId, opts, cdnBaseUrl, mediaType }) {
+async function uploadMediaToWeixin({ filePath, toUserId, opts, cdnBaseUrl, mediaType, getUploadUrlImpl }) {
   const plaintext = await fs.readFile(filePath);
   const rawsize = plaintext.length;
   const rawfilemd5 = crypto.createHash("md5").update(plaintext).digest("hex");
@@ -51,7 +52,7 @@ async function uploadMediaToWeixin({ filePath, toUserId, opts, cdnBaseUrl, media
   const filekey = crypto.randomBytes(16).toString("hex");
   const aeskey = crypto.randomBytes(16);
 
-  const uploadUrlResp = await getUploadUrl({
+  const uploadUrlResp = await getUploadUrlImpl({
     ...opts,
     filekey,
     media_type: mediaType,
@@ -92,10 +93,12 @@ function buildMediaRef(uploaded) {
   };
 }
 
-async function sendMediaItem({ to, item, contextToken, baseUrl, token }) {
-  await sendMessage({
+async function sendMediaItem({ to, item, contextToken, baseUrl, token, routeTag = "", clientVersion = "", sendMessageImpl }) {
+  await sendMessageImpl({
     baseUrl,
     token,
+    routeTag,
+    clientVersion,
     body: {
       msg: {
         from_user_id: "",
@@ -110,13 +113,40 @@ async function sendMediaItem({ to, item, contextToken, baseUrl, token }) {
   });
 }
 
-async function sendWeixinMediaFile({ filePath, to, contextToken, baseUrl, token, cdnBaseUrl }) {
+function resolveWeixinMediaApi(apiVariant) {
+  if (String(apiVariant || "").trim().toLowerCase() === "v2") {
+    // Upload URL lookup and the final sendmessage call must stay on the same
+    // v2 header stack as text polling/sending, or routed sessions may split
+    // across gateways after login and fail only on attachments.
+    return {
+      getUploadUrlImpl: getUploadUrlV2,
+      sendMessageImpl: sendMessageV2,
+    };
+  }
+  return {
+    getUploadUrlImpl: getUploadUrl,
+    sendMessageImpl: sendMessage,
+  };
+}
+
+async function sendWeixinMediaFile({
+  filePath,
+  to,
+  contextToken,
+  baseUrl,
+  token,
+  cdnBaseUrl,
+  apiVariant = "legacy",
+  routeTag = "",
+  clientVersion = "",
+}) {
   if (!contextToken) {
     throw new Error("sendWeixinMediaFile requires contextToken");
   }
 
   const mime = getMimeFromFilename(filePath);
-  const uploadOpts = { baseUrl, token };
+  const uploadOpts = { baseUrl, token, routeTag, clientVersion };
+  const { getUploadUrlImpl, sendMessageImpl } = resolveWeixinMediaApi(apiVariant);
 
   if (mime.startsWith("image/")) {
     const uploaded = await uploadMediaToWeixin({
@@ -125,12 +155,16 @@ async function sendWeixinMediaFile({ filePath, to, contextToken, baseUrl, token,
       opts: uploadOpts,
       cdnBaseUrl,
       mediaType: WEIXIN_MEDIA_TYPE.IMAGE,
+      getUploadUrlImpl,
     });
     await sendMediaItem({
       to,
       contextToken,
       baseUrl,
       token,
+      routeTag,
+      clientVersion,
+      sendMessageImpl,
       item: {
         type: 2,
         image_item: {
@@ -151,12 +185,16 @@ async function sendWeixinMediaFile({ filePath, to, contextToken, baseUrl, token,
       opts: uploadOpts,
       cdnBaseUrl,
       mediaType: WEIXIN_MEDIA_TYPE.VIDEO,
+      getUploadUrlImpl,
     });
     await sendMediaItem({
       to,
       contextToken,
       baseUrl,
       token,
+      routeTag,
+      clientVersion,
+      sendMessageImpl,
       item: {
         type: 5,
         video_item: {
@@ -174,12 +212,16 @@ async function sendWeixinMediaFile({ filePath, to, contextToken, baseUrl, token,
     opts: uploadOpts,
     cdnBaseUrl,
     mediaType: WEIXIN_MEDIA_TYPE.FILE,
+    getUploadUrlImpl,
   });
   await sendMediaItem({
     to,
     contextToken,
     baseUrl,
     token,
+    routeTag,
+    clientVersion,
+    sendMessageImpl,
     item: {
       type: 4,
       file_item: {

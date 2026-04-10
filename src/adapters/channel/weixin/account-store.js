@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { normalizeRouteTag } = require("./protocol");
 
 function normalizeAccountId(raw) {
   return String(raw || "")
@@ -40,12 +41,16 @@ function saveWeixinAccount(config, rawAccountId, update) {
   const accountId = normalizeAccountId(rawAccountId);
   const filePath = resolveAccountPath(config, accountId);
   const existing = loadWeixinAccount(config, accountId) || {};
+  const hasRouteTag = Object.prototype.hasOwnProperty.call(update || {}, "routeTag");
   const next = {
     accountId,
     rawAccountId: String(rawAccountId || "").trim() || existing.rawAccountId || "",
     token: typeof update.token === "string" && update.token.trim() ? update.token.trim() : existing.token || "",
     baseUrl: typeof update.baseUrl === "string" && update.baseUrl.trim() ? update.baseUrl.trim() : existing.baseUrl || config.weixinBaseUrl,
     userId: typeof update.userId === "string" ? update.userId.trim() : existing.userId || "",
+    routeTag: hasRouteTag
+      ? normalizeRouteTag(update.routeTag)
+      : normalizeRouteTag(existing.routeTag || config.weixinRouteTag),
     savedAt: new Date().toISOString(),
   };
   fs.writeFileSync(filePath, JSON.stringify(next, null, 2), "utf8");
@@ -74,6 +79,9 @@ function loadWeixinAccount(config, accountId) {
       token: typeof parsed.token === "string" ? parsed.token : "",
       baseUrl: typeof parsed.baseUrl === "string" && parsed.baseUrl.trim() ? parsed.baseUrl.trim() : config.weixinBaseUrl,
       userId: typeof parsed.userId === "string" ? parsed.userId : "",
+      routeTag: Object.prototype.hasOwnProperty.call(parsed, "routeTag")
+        ? normalizeRouteTag(parsed.routeTag)
+        : normalizeRouteTag(config.weixinRouteTag),
       savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
     };
   } catch {

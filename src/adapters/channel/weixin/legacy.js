@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const { listWeixinAccounts } = require("./account-store");
 const { resolveSelectedAccount } = require("./account-store");
 const { loadPersistedContextTokens, persistContextToken } = require("./context-token-store");
-const { runLoginFlow } = require("./login");
+const { runLegacyLoginFlow } = require("./login-legacy");
 const { getConfig, getUpdates, sendMessage, sendTyping } = require("./api");
 const { sendWeixinMediaFile } = require("./media-send");
 const { normalizeWeixinIncomingMessage } = require("./message-utils");
@@ -70,7 +70,7 @@ function createLegacyWeixinChannelAdapter(config) {
       };
     },
     async login() {
-      await runLoginFlow(config);
+      await runLegacyLoginFlow(config);
     },
     printAccounts() {
       const accounts = listWeixinAccounts(config);
@@ -83,6 +83,9 @@ function createLegacyWeixinChannelAdapter(config) {
         console.log(`- ${account.accountId}`);
         console.log(`  userId: ${account.userId || "(unknown)"}`);
         console.log(`  baseUrl: ${account.baseUrl || config.weixinBaseUrl}`);
+        if (account.routeTag) {
+          console.log(`  routeTag: ${account.routeTag}`);
+        }
         console.log(`  savedAt: ${account.savedAt || "(unknown)"}`);
       }
     },
