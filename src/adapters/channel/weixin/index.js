@@ -226,6 +226,11 @@ function createWeixinChannelAdapter(config) {
       if (!resolvedToken) {
         throw new Error(`缺少 context_token，无法发送文件给用户 ${userId}`);
       }
+      // Text polling/sending stays on the v2 stack, but attachments intentionally
+      // keep using the legacy media API. The original implementation never moved
+      // sendFile onto the v2 upload headers, and timeline screenshot delivery
+      // breaks with "getUploadUrl returned no upload_param" once media is forced
+      // through that path.
       return sendWeixinMediaFile({
         filePath,
         to: userId,
@@ -233,7 +238,7 @@ function createWeixinChannelAdapter(config) {
         baseUrl: account.baseUrl,
         token: account.token,
         cdnBaseUrl: config.weixinCdnBaseUrl,
-        apiVariant: "v2",
+        apiVariant: "legacy",
         routeTag: account.routeTag,
         clientVersion: config.weixinProtocolClientVersion,
       });
