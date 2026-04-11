@@ -375,6 +375,8 @@ function buildTopicUsage(topic) {
         "  --at 2026-04-07T21:30+08:00 | 2026-04-07 21:30",
         "  --text \"提醒内容\"",
         "  --user <wechatUserId>  可选",
+        "",
+        "当前选中的 sender id 必须已经有可用的 context_token；否则命令会直接失败。",
       ].join("\n");
     case "diary":
       return [
