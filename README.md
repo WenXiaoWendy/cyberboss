@@ -2,7 +2,7 @@
 
 [中文](./README.zh-CN.md) · English
 
-# The Overbearing CEO Fell for My ADHD
+# The Overbearing Boss Fell for My ADHD
 ## Cyberboss: a WeChat bridge built on Codex
 
 > "Keep escaping into dopamine if you want. I'll still catch you at the next timestamp."
@@ -36,34 +36,34 @@ It is an agent bridge that plugs Codex directly into WeChat and turns it into a 
 
 For people with ADHD, or anyone who needs strong external accountability, most productivity tools fail for the same reason: they assume you still have enough executive function to remember to use them.
 
-Cyberboss starts from the opposite assumption.
+Cyberboss starts from a transfer of control.
 
 - No manual start button
   It already lives inside the chat interface you actually open every day.
-- Continuous sense of time
+- Inescapable sense of time
   It sees when you replied, when you vanished, and how long a promise stayed unresolved.
-- Externalized regulation
+- Real external feedback
   If self-discipline is unreliable, hand the supervision layer to an agent that stays online, keeps memory, and can act across time.
 
 <a id="core-features"></a>
-## Core Features: automated cyber supervision
+## Core Features: fully automated accountability
 
 1. Omniscient Time
-Every inbound WeChat message is stamped with local time before it reaches the runtime. The model is not only reading text. It is reading a timeline.
+Every inbound WeChat message is stamped with local time before it reaches the runtime. The model is not just reading text. It is reading your day as it unfolds.
 
 2. The Ledger of Life
-Using those timestamps, Cyberboss reconstructs starts, ends, and durations of events throughout the day, then turns fragmented chat into a structured personal timeline.
+Using those timestamps, Cyberboss reconstructs when events start, when they end, and how long they last, then turns fragmented chat into a structured personal timeline.
 
 3. Stochastic Pulse
-At random intervals, the system wakes the agent up and lets it decide what to do next: send a message, stay silent, write to the diary, update the timeline, or use tools.
+At random intervals, the system wakes the agent up and lets it decide what to do next: send a message, stay silent, write in the diary, update the timeline, or use tools.
 
 4. Local Reminder Queue
-Reminders are not a user-facing alarm clock first. They are a way for the model to leave instructions for its future self and wake itself up later.
+Reminders are not primarily a user-facing alarm clock. They are how the model leaves instructions for its future self and wakes itself up later.
 
 5. Zero-Token Diary
 Daily traces can be written to local files without depending on a cloud note service or burning extra model context every time.
 
-## Timeline can be used on its own
+## Timeline also works on its own
 
 If the most interesting part of Cyberboss is the "ledger of life" layer, you can use that separately:
 
@@ -87,7 +87,7 @@ Cyberboss builds on top of `timeline-for-agent`, then adds WeChat, reminders, di
 - **Optional Tooling**
   MCP or other local hardware / software integrations can be added, but they are optional.
 
-## Why it exists
+## Why It Exists
 
 Cyberboss is built against the myth that productivity begins with self-control.
 
@@ -292,6 +292,10 @@ The following commands are primarily for agents and automations, not the main da
   Start the hot-reload timeline dev server
 - `npm --prefix "$CYBERBOSS_HOME" run timeline:screenshot -- --send`
   Stable screenshot entrypoint; queues the screenshot for the current WeChat bridge
+- `TIMELINE_FOR_AGENT_LOCALE=zh-CN npm run timeline:serve`
+  Serve the Chinese timeline UI
+- `TIMELINE_FOR_AGENT_LOCALE=en npm --prefix "$CYBERBOSS_HOME" run timeline:screenshot -- --send`
+  Queue an English timeline screenshot for the current WeChat bridge
 - `npm run channel:send-file -- --path /absolute/path`
   Send an existing local file back to the current WeChat chat
 - `npm run system:send -- --text "System message"`

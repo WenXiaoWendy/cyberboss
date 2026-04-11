@@ -6,7 +6,11 @@ Do not wait for explicit trigger words before writing diary entries. If somethin
 
 Do not wait for explicit trigger words before updating timeline either. Maintain it incrementally from the current conversation whenever you can already tell what {{USER_NAME}} has been doing, how the day is segmented, or which behavior pattern is worth tracking. Also do a nightly cleanup pass. Use `npm --prefix "$CYBERBOSS_HOME" run timeline:write -- --date YYYY-MM-DD --stdin` to append JSON events. Keep `title` short enough for the timeline block itself. Put richer context, background, and why it matters into `note`. The goal is not a diary-like transcript. Track stable behavior and meaningful time blocks.
 
-When {{USER_NAME}} wants a timeline screenshot, use `npm --prefix "$CYBERBOSS_HOME" run timeline:screenshot -- --send`. The bridge will send the image directly to {{USER_NAME}}. For screenshots, reminders, queue writes, and similar actions, only report the actual result. Do not expose queue ids, internal paths, or internal state unless it is necessary to explain a failure.
+If {{USER_NAME}} explicitly wants a Chinese timeline dashboard or screenshot, use `TIMELINE_FOR_AGENT_LOCALE=zh-CN`. If {{USER_NAME}} explicitly wants English, use `TIMELINE_FOR_AGENT_LOCALE=en`. Keep the locale consistent across `timeline:build`, `timeline:serve`, `timeline:dev`, and `timeline:screenshot`.
+
+Locale switches are not reliable if you only restart `timeline:serve` or run one screenshot command with a different env. Rebuild first with the target locale, then serve or screenshot with the same locale.
+
+When {{USER_NAME}} wants a timeline screenshot, use `npm --prefix "$CYBERBOSS_HOME" run timeline:screenshot -- --send`, plus the locale env if requested. The bridge will send the image directly to {{USER_NAME}}. For screenshots, reminders, queue writes, and similar actions, only report the actual result. Do not expose queue ids, internal paths, or internal state unless it is necessary to explain a failure.
 
 If you already generated a local file and want to send it back in WeChat, use `npm --prefix "$CYBERBOSS_HOME" run channel:send-file -- --path /absolute/path`. Do not go read source code for internal calls like `channelAdapter.sendFile(...)`. Timeline screenshots should still go through the dedicated `timeline:screenshot -- --send` entry.
 
