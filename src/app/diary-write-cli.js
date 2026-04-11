@@ -10,8 +10,8 @@ async function runDiaryWriteCommand(config) {
   }
 
   const now = new Date();
-  const dateString = options.date || formatDate(now);
-  const timeString = options.time || formatTime(now);
+  const dateString = options.date || formatDate(now, config.timezone);
+  const timeString = options.time || formatTime(now, config.timezone);
   const filePath = path.join(config.diaryDir, `${dateString}.md`);
   const entry = buildDiaryEntry({
     timeString,
@@ -96,18 +96,18 @@ function normalizeBody(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();
 }
 
-function formatDate(date) {
+function formatDate(date, timezone) {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(date);
 }
 
-function formatTime(date) {
+function formatTime(date, timezone) {
   return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
+    timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
