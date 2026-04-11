@@ -40,7 +40,7 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const spawnSpec = buildTimelineSpawnSpec(binPath, args);
     const child = spawn(spawnSpec.command, spawnSpec.args, {
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
         ...extraEnv,
@@ -63,6 +63,8 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
       process.stderr.write(text);
     });
 
+    wireTimelineStdin(child, args);
+
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (signal) {
@@ -70,7 +72,8 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
         return;
       }
       if (code !== 0) {
-        reject(new Error(`timeline 命令执行失败，退出码 ${code}`));
+        const detail = extractTimelineCommandFailure(stdout, stderr);
+        reject(new Error(detail || `timeline 命令执行失败，退出码 ${code}`));
         return;
       }
       if (options.subcommand === "write") {
@@ -150,6 +153,42 @@ function detectTimelineWriteFailure(stdout, stderr) {
     return "timeline write 没有写入任何事件；当前结果是 events: 0 且 status: missing。请检查是否真的传入了有效 JSON events。";
   }
   return "";
+}
+
+function extractTimelineCommandFailure(stdout, stderr) {
+  const output = `${stderr}\n${stdout}`;
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const targeted = lines.find((line) => line.includes("timeline 事件无效"))
+    || lines.find((line) => line.includes("timeline 事件不能跨天"))
+    || lines.find((line) => line.includes("timeline-write"))
+    || lines.at(-1);
+
+  return targeted || "";
+}
+
+function wireTimelineStdin(child, args = []) {
+  if (!child?.stdin) {
+    return;
+  }
+
+  const shouldForward = Array.isArray(args)
+    && args.some((value) => String(value || "").trim() === "--stdin");
+
+  if (!shouldForward) {
+    child.stdin.end();
+    return;
+  }
+
+  if (process.stdin.isTTY) {
+    child.stdin.end();
+    return;
+  }
+
+  process.stdin.pipe(child.stdin);
 }
 
 module.exports = { createTimelineIntegration };

@@ -27,6 +27,7 @@
     "diary:write": "node ./bin/cyberboss.js diary write",
     "system:send": "node ./bin/cyberboss.js system send",
     "system:checkin": "node ./bin/cyberboss.js system checkin-poller",
+    "timeline:categories": "node ./bin/cyberboss.js timeline categories",
     "timeline:write": "node ./bin/cyberboss.js timeline write",
     "timeline:build": "node ./bin/cyberboss.js timeline build",
     "timeline:serve": "node ./bin/cyberboss.js timeline serve",

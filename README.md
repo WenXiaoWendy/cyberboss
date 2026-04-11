@@ -274,6 +274,8 @@ The following commands are primarily for agents and automations, not the main da
 
 ### Common agent commands
 
+- `npm run timeline:categories`
+  Print the current taxonomy and eventNodes; use this first if `categoryId`, `subcategoryId`, or `eventNodeId` is unclear
 - `npm run reminder:write -- --delay 30m --text "Reminder text"`
   Write a reminder for the future self
 - `npm run reminder:write -- --at "2026-04-07 21:30" --text "Reminder text"`
@@ -282,8 +284,12 @@ The following commands are primarily for agents and automations, not the main da
   Write a local diary entry
 - `npm run diary:write -- --date 2026-04-06 --title "4.6" --text "Content"`
   Write a diary entry into a specific date file
-- `npm run timeline:write -- --date YYYY-MM-DD --stdin`
-  Incrementally write timeline events
+- `npm run timeline:write -- --date YYYY-MM-DD --json '{"events":[...]}'
+  Incrementally write timeline events; if you use `--stdin`, pass a full JSON object like `{"events":[...]}`, not a raw array
+  Each event must include valid `startAt` and `endAt` absolute timestamps such as `2026-04-10T09:00:00+08:00`, with `endAt > startAt`, and both timestamps must fall on the same calendar day as `--date`
+  Each event must also include either `eventNodeId`, or `subcategoryId` with a resolvable category; explicitly passing both `categoryId` and `subcategoryId` is the safest form
+  If classification ids are unclear, run `npm run timeline:categories` first
+  Example: `npm run timeline:write -- --date 2026-04-10 --json '{"events":[{"id":"evt_1","startAt":"2026-04-10T09:00:00+08:00","endAt":"2026-04-10T09:30:00+08:00","title":"Breakfast","categoryId":"life","subcategoryId":"life.daily"}]}'`
 - `npm run timeline:build`
   Build the static timeline site
 - `npm run timeline:serve`

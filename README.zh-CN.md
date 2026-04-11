@@ -282,6 +282,8 @@ ${HOME}/.cyberboss
 
 ### Agent 常用命令
 
+- `npm run timeline:categories`
+  打印当前 taxonomy 和 eventNode；如果不确定 `categoryId`、`subcategoryId` 或 `eventNodeId`，先跑这个
 - `npm run reminder:write -- --delay 30m --text "提醒内容"`
   给未来的自己留 reminder
 - `npm run reminder:write -- --at "2026-04-07 21:30" --text "提醒内容"`
@@ -290,8 +292,12 @@ ${HOME}/.cyberboss
   写本地日记
 - `npm run diary:write -- --date 2026-04-06 --title "4.6" --text "内容"`
   写指定日期日记
-- `npm run timeline:write -- --date YYYY-MM-DD --stdin`
-  增量写入时间轴
+- `npm run timeline:write -- --date YYYY-MM-DD --json '{"events":[...]}'
+  增量写入时间轴；如果用 `--stdin`，传完整 JSON 对象 `{"events":[...]}`，不要传裸数组
+  每条事件都必须带合法的 `startAt` 和 `endAt` 绝对时间戳，例如 `2026-04-10T09:00:00+08:00`；同时要求 `endAt > startAt`，而且两个时间都必须落在 `--date` 对应的那一天内
+  每条事件还必须提供 `eventNodeId`，或者提供能推导分类的 `subcategoryId`；最稳妥的写法是显式同时传 `categoryId` 和 `subcategoryId`
+  如果分类 id 不确定，先执行 `npm run timeline:categories`
+  示例：`npm run timeline:write -- --date 2026-04-10 --json '{"events":[{"id":"evt_1","startAt":"2026-04-10T09:00:00+08:00","endAt":"2026-04-10T09:30:00+08:00","title":"早餐","categoryId":"life","subcategoryId":"life.daily"}]}'`
 - `npm run timeline:build`
   构建时间轴静态页面
 - `npm run timeline:serve`
