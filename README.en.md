@@ -23,10 +23,9 @@
 </div>
 
 <p align="center">
-  <img src="./docs/images/chat-example-1.jpg" alt="Cyberboss demo 1" width="23%" />
-  <img src="./docs/images/chat-example-2.jpg" alt="Cyberboss demo 2" width="23%" />
-  <img src="./docs/images/chat-example-3.jpg" alt="Cyberboss demo 3" width="23%" />
-  <img src="./docs/images/chat-example-4.jpg" alt="Cyberboss demo 4" width="23%" />
+  <img src="./docs/images/IMG_0241.PNG" alt="Cyberboss demo 1" width="31%" />
+  <img src="./docs/images/IMG_0244.PNG" alt="Cyberboss demo 2" width="31%" />
+  <img src="./docs/images/IMG_0245.PNG" alt="Cyberboss demo 3" width="31%" />
 </p>
 
 Cyberboss is not another polite productivity timer. It is not a to-do list with better branding either.

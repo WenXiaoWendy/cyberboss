@@ -10,7 +10,6 @@ const { loadSyncBuffer, saveSyncBuffer } = require("./sync-buffer-store");
 
 const LONG_POLL_TIMEOUT_MS = 35_000;
 const SEND_MESSAGE_CHUNK_INTERVAL_MS = 350;
-const WEIXIN_SEND_CHUNK_LIMIT = 80;
 const MAX_WEIXIN_CHUNK = 3800;
 const WEIXIN_MAX_DELIVERY_MESSAGES = 10;
 
@@ -136,8 +135,8 @@ function createLegacyWeixinChannelAdapter(config) {
       const sendChunks = preserveBlock
         ? splitUtf8(compactPlainTextForWeixin(content) || "Completed.", MAX_WEIXIN_CHUNK)
         : packChunksForWeixinDelivery(
-          chunkReplyTextForWeixin(content, WEIXIN_SEND_CHUNK_LIMIT).length
-            ? chunkReplyTextForWeixin(content, WEIXIN_SEND_CHUNK_LIMIT)
+          chunkReplyTextForWeixin(content).length
+            ? chunkReplyTextForWeixin(content)
             : ["Completed."],
           WEIXIN_MAX_DELIVERY_MESSAGES,
           MAX_WEIXIN_CHUNK
@@ -266,7 +265,7 @@ function chunkReplyText(text, limit = 3500) {
   return chunks.filter(Boolean);
 }
 
-function chunkReplyTextForWeixin(text, limit = 80) {
+function chunkReplyTextForWeixin(text) {
   const normalized = trimOuterBlankLines(String(text || "").replace(/\r\n/g, "\n"));
   if (!normalized.trim()) {
     return [];
@@ -274,7 +273,7 @@ function chunkReplyTextForWeixin(text, limit = 80) {
 
   const boundaries = collectStreamingBoundaries(normalized);
   if (!boundaries.length) {
-    return chunkReplyText(normalized, limit);
+    return chunkReplyText(normalized, MAX_WEIXIN_CHUNK);
   }
 
   const units = [];
@@ -296,16 +295,16 @@ function chunkReplyTextForWeixin(text, limit = 80) {
   }
 
   if (!units.length) {
-    return chunkReplyText(normalized, limit);
+    return chunkReplyText(normalized, MAX_WEIXIN_CHUNK);
   }
 
   const chunks = [];
   for (const unit of units) {
-    if (unit.length <= limit) {
+    if (unit.length <= MAX_WEIXIN_CHUNK) {
       chunks.push(unit);
       continue;
     }
-    chunks.push(...chunkReplyText(unit, limit));
+    chunks.push(...chunkReplyText(unit, MAX_WEIXIN_CHUNK));
   }
   return chunks.filter(Boolean);
 }

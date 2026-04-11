@@ -23,9 +23,10 @@
 </div>
 
 <p align="center">
-  <img src="./docs/images/IMG_0241.PNG" alt="Cyberboss 示例对话 1" width="31%" />
-  <img src="./docs/images/IMG_0244.PNG" alt="Cyberboss 示例对话 2" width="31%" />
-  <img src="./docs/images/IMG_0245.PNG" alt="Cyberboss 示例对话 3" width="31%" />
+  <img src="./docs/images/chat-example-1.jpg" alt="Cyberboss 示例对话 1" width="23%" />
+  <img src="./docs/images/chat-example-2.jpg" alt="Cyberboss 示例对话 2" width="23%" />
+  <img src="./docs/images/chat-example-3.jpg" alt="Cyberboss 示例对话 3" width="23%" />
+  <img src="./docs/images/chat-example-4.jpg" alt="Cyberboss 示例对话 4" width="23%" />
 </p>
 
 Cyberboss 不是另一个平庸的番茄钟，也不是一个只会堆积任务的待办清单。
