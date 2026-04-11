@@ -1425,7 +1425,7 @@ function buildCodexInboundText(normalized, persisted = {}, config = {}) {
   const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
   const failed = Array.isArray(persisted?.failed) ? persisted.failed : [];
   const userName = String(config?.userName || "").trim() || "用户";
-  const localTime = formatWechatLocalTime(normalized?.receivedAt);
+  const localTime = formatWechatLocalTime(normalized?.receivedAt, config.timezone);
   const lines = [];
   if (localTime) {
     lines.push(`[${localTime}]`);
@@ -1464,7 +1464,7 @@ function buildCodexInboundText(normalized, persisted = {}, config = {}) {
   return lines.join("\n").trim();
 }
 
-function formatWechatLocalTime(receivedAt) {
+function formatWechatLocalTime(receivedAt, timezone) {
   const value = typeof receivedAt === "string" ? receivedAt.trim() : "";
   if (!value) {
     return "";
@@ -1474,7 +1474,7 @@ function formatWechatLocalTime(receivedAt) {
     return value;
   }
   return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

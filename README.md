@@ -138,6 +138,7 @@ Common optional variables:
 ```dotenv
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
+CYBERBOSS_TIMEZONE=America/New_York
 CYBERBOSS_WEIXIN_ADAPTER=v2
 ```
 
@@ -149,6 +150,8 @@ Why this matters:
 If you want the strongest "push" effect, do not immediately rewrite the persona template by hand. Let the agent develop its rhythm through real conversation first, then edit only the parts that are clearly wrong.
 
 If you plan to use shared mode, set `CYBERBOSS_WORKSPACE_ROOT` before the first start so `shared:open` resolves the right thread for the right project.
+
+`CYBERBOSS_TIMEZONE` is optional. If you leave it unset, Cyberboss uses your system timezone. Timeline day validation and diary timestamps should follow that timezone. Existing timeline state created under the old default timezone is auto-synced the next time you run a timeline command.
 
 ### Terminal commands for end users
 

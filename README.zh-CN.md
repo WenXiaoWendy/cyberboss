@@ -142,6 +142,7 @@ CYBERBOSS_WORKSPACE_ROOT=/绝对路径/你的项目目录
 ```dotenv
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
+CYBERBOSS_TIMEZONE=America/New_York
 CYBERBOSS_WEIXIN_ADAPTER=v2
 ```
 
@@ -155,6 +156,8 @@ CYBERBOSS_WEIXIN_ADAPTER=v2
 另外，如果你想要更强的“push 感”，建议一开始先不要主动大改 instructions 模板。先让 agent 在真实交流里自己更新行为，再回头只修明显不对的部分。
 
 如果你要跑共享线程，建议也在第一次启动前就把 `CYBERBOSS_WORKSPACE_ROOT` 配好。这样 `shared:open` 会优先接到你当前项目对应的那条线程，而不是回退到别的历史绑定。
+
+`CYBERBOSS_TIMEZONE` 是可选项。不设时，Cyberboss 默认使用系统时区。timeline 的日期校验和 diary 时间戳都会跟这个时区走；如果本地 timeline state 还是旧的默认时区，下一次执行 timeline 命令时会自动同步过去。
 
 ### 用户自己会用到的终端命令
 

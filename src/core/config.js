@@ -1,6 +1,8 @@
 const os = require("os");
 const path = require("path");
 
+const { resolveConfiguredTimezone } = require("./timezone");
+
 function readConfig() {
   const argv = process.argv.slice(2);
   const mode = argv[0] || "";
@@ -12,6 +14,8 @@ function readConfig() {
     stateDir,
     workspaceId: readTextEnv("CYBERBOSS_WORKSPACE_ID") || "default",
     workspaceRoot: readTextEnv("CYBERBOSS_WORKSPACE_ROOT") || process.cwd(),
+    timezone: resolveConfiguredTimezone(readTextEnv("CYBERBOSS_TIMEZONE")),
+    forceTimelineTimezone: readBoolEnv("CYBERBOSS_FORCE_TIMELINE_TIMEZONE"),
     userName: readTextEnv("CYBERBOSS_USER_NAME") || "用户",
     userGender: readTextEnv("CYBERBOSS_USER_GENDER") || "female",
     allowedUserIds: readListEnv("CYBERBOSS_ALLOWED_USER_IDS"),

@@ -2,6 +2,8 @@ const path = require("path");
 const { spawn } = require("child_process");
 const os = require("os");
 
+const { ensureTimelineStateTimezone } = require("./state-sync");
+
 const IS_WINDOWS = os.platform() === "win32";
 
 function createTimelineIntegration(config) {
@@ -21,6 +23,7 @@ function createTimelineIntegration(config) {
       if (!normalizedSubcommand) {
         throw new Error("timeline 子命令不能为空");
       }
+      ensureTimelineStateTimezone(config);
       return runTimelineCommand(binPath, [normalizedSubcommand, ...normalizeArgs(args)], {
         TIMELINE_FOR_AGENT_STATE_DIR: config.stateDir,
         TIMELINE_FOR_AGENT_CHROME_PATH: resolveTimelineChromePath(),
