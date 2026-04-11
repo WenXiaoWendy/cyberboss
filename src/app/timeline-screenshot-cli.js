@@ -95,13 +95,13 @@ function parseTimelineScreenshotArgs(args) {
 
 function printTimelineScreenshotHelp() {
   console.log(`
-Usage: npm run timeline:screenshot -- --send [--user <wechatUserId>] [--output /absolute/path] [other timeline screenshot args]
+Usage: cyberboss timeline screenshot --send [--user <wechatUserId>] [--output /absolute/path] [other timeline screenshot args]
 
 Notes:
   This command only queues the screenshot job locally. The actual screenshot is taken by the running WeChat bridge.
 
 Example:
-  npm run timeline:screenshot -- --send --selector timeline
+  cyberboss timeline screenshot --send --selector timeline --locale en
 `);
 }
 

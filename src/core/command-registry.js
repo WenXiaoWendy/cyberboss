@@ -1,3 +1,5 @@
+const path = require("path");
+
 const COMMAND_GROUPS = [
   {
     id: "lifecycle",
@@ -247,7 +249,7 @@ function listCommandGroups() {
 
 function buildTerminalHelpText() {
   const lines = [
-    "Usage: npm run <script>",
+    "Usage: cyberboss <command>",
     "",
     "Current terminal commands:",
     "  npm run shared:start   default entrypoint for the shared app-server and WeChat bridge",
@@ -349,6 +351,8 @@ function normalizeTopic(value) {
 }
 
 module.exports = {
+  buildAgentCommandGuide,
+  buildAgentCommandReminder,
   buildTerminalHelpText,
   buildTerminalTopicHelp,
   buildWeixinHelpText,
@@ -356,101 +360,202 @@ module.exports = {
   listCommandGroups,
 };
 
+function buildAgentCommandReminder() {
+  return "For local commands, trust workspace help only. Do not invent variants.";
+}
+
+function buildAgentCommandGuide(topics = []) {
+  const normalizedTopics = Array.from(new Set(
+    (Array.isArray(topics) ? topics : [])
+      .map((value) => normalizeTopic(value))
+      .filter(Boolean)
+  ));
+  if (!normalizedTopics.length) {
+    return buildAgentCommandReminder();
+  }
+
+  const sections = [buildAgentCommandReminder()];
+  for (const topic of normalizedTopics) {
+    sections.push("", `${topic.toUpperCase()} COMMAND HELP`, buildScopedTopicHelp(topic));
+  }
+  return sections.join("\n").trim();
+}
+
 function formatTerminalExamples(action) {
   const terminal = Array.isArray(action?.terminal) ? action.terminal : [];
   if (!terminal.length) {
     return "";
   }
-  return terminal.map((commandText) => toNpmRunExample(commandText)).join(", ");
+  return terminal.map((commandText) => toTerminalCommandExample(commandText)).join(", ");
 }
 
 function buildTopicUsage(topic) {
   switch (topic) {
     case "reminder":
       return [
-        "npm run reminder:write -- <args>",
+        "cyberboss reminder write <args>",
         "",
         "Arguments:",
         "  --delay 30s|10m|1h30m|2d4h",
         "  --at 2026-04-07T21:30+08:00 | 2026-04-07 21:30",
         "  --text \"Reminder text\"",
-        "  --stdin                    prefer this for long text or text containing quotes",
+        "  --text-file /absolute/path prefer this for long text or text containing quotes",
+        "  --stdin                    fallback if you truly need stdin",
         "  --user <wechatUserId>      optional",
         "",
         "Examples:",
-        "  npm run reminder:write -- --delay 30m --text \"Reminder text\"",
-        "  printf '%s\\n' 'Ask again in 20 minutes if she still has not come back.' | npm run reminder:write -- --delay 20m --stdin",
+        "  cyberboss reminder write --delay 30m --text \"Reminder text\"",
+        "  cyberboss reminder write --delay 20m --text-file /absolute/path/to/reminder.txt",
       ].join("\n");
     case "diary":
       return [
-        "npm run diary:write -- <args>",
+        "cyberboss diary write <args>",
         "",
         "Arguments:",
         "  --text \"Content\"",
+        "  --text-file /absolute/path",
         "  --title \"Title\"      only affects the entry title, not the target date file",
         "  --date YYYY-MM-DD     decides which diary file to write into",
         "  --time HH:mm          optional, overrides the entry time",
         "",
         "Example:",
-        "  npm run diary:write -- --date 2026-04-06 --title \"4.6\" --text \"Content\"",
+        "  cyberboss diary write --date 2026-04-06 --title \"4.6\" --text-file /absolute/path/to/entry.md",
       ].join("\n");
     case "channel":
       return [
-        "npm run channel:send-file -- --path /absolute/path [--user <wechatUserId>]",
+        "cyberboss channel send-file --path /absolute/path [--user <wechatUserId>]",
         "",
         "Arguments:",
         "  --path /absolute/path     local file to send back to the current WeChat chat",
         "  --user <wechatUserId>    optional, overrides the default receiver",
       ].join("\n");
     case "system":
-      return "npm run system:send -- <args> / npm run system:checkin";
+      return "cyberboss system send <args> / cyberboss system checkin-poller";
     case "timeline":
       return [
-        "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot -- --send",
+        "cyberboss timeline write <args> / cyberboss timeline build [--locale <id>] / cyberboss timeline serve [--locale <id>] / cyberboss timeline dev [--locale <id>] / cyberboss timeline screenshot --send [--locale <id>]",
+        "",
+        "Common flags:",
+        "  --locale en|zh-CN   applies to build, serve, dev, and screenshot",
+        "  --send              only for screenshot; queue the image for the current WeChat bridge to send",
         "",
         "Notes:",
-        "  The stable timeline screenshot entrypoint is `npm run timeline:screenshot -- --send`. It hands the job to the current WeChat bridge.",
+        "  `timeline write` expects a JSON object with `events: [...]`, not a bare array or `{\"title\":\"...\"}` placeholder.",
+        "  each event must include `startAt`, `endAt`, and either `eventNodeId` or a resolvable `subcategoryId` (preferably with `categoryId`).",
+        "  The stable timeline screenshot entrypoint is `cyberboss timeline screenshot --send`. It hands the job to the current WeChat bridge.",
       ].join("\n");
     default:
-      return "npm run <script>";
+      return "cyberboss <command>";
   }
 }
 
-function toNpmRunExample(commandText) {
+function buildScopedTopicHelp(topic) {
+  switch (normalizeTopic(topic)) {
+    case "reminder":
+      return [
+        `${buildAgentCommandInvocation(["reminder", "write", "--delay", "30m", "--text", "Reminder text"])}`,
+        `${buildAgentCommandInvocation(["reminder", "write", "--delay", "20m", "--text-file", "/absolute/path/to/reminder.txt"])}   long text`,
+      ].join("\n");
+    case "diary":
+      return [
+        `${buildAgentCommandInvocation(["diary", "write", "--title", "Title", "--text", "Content"])}`,
+        `${buildAgentCommandInvocation(["diary", "write", "--date", "YYYY-MM-DD", "--title", "Title", "--text-file", "/absolute/path/to/entry.md"])}   long text`,
+      ].join("\n");
+    case "timeline":
+      return [
+        `${buildAgentCommandInvocation(["timeline", "write", "--date", "YYYY-MM-DD", "--events-json", "{\"events\":[{\"startAt\":\"2026-04-12T09:00:00+08:00\",\"endAt\":\"2026-04-12T09:30:00+08:00\",\"title\":\"Breakfast\",\"categoryId\":\"life\",\"subcategoryId\":\"life.meal\"}]}"])} `,
+        "JSON must be an object with `events`; each event needs `startAt`, `endAt`, and either `eventNodeId` or a resolvable `subcategoryId`.",
+        `${buildAgentCommandInvocation(["timeline", "write", "--date", "YYYY-MM-DD", "--events-file", "/absolute/path/to/events.json"])}   large payload`,
+        `${buildAgentCommandInvocation(["timeline", "serve", "--locale", "zh-CN"])} / ${buildAgentCommandInvocation(["timeline", "screenshot", "--send", "--locale", "en"])}   locale-sensitive`,
+      ].join("\n");
+    case "channel":
+      return buildAgentCommandInvocation(["channel", "send-file", "--path", "/absolute/path"]);
+    case "system":
+      return [
+        `${buildAgentCommandInvocation(["system", "send", "--text", "System message", "--workspace", "/absolute/path"])}`,
+        `${buildAgentCommandInvocation(["system", "checkin-poller"])}   poller only`,
+      ].join("\n");
+    default:
+      return buildTopicUsage(topic);
+  }
+}
+
+function toTerminalCommandExample(commandText) {
   const normalized = typeof commandText === "string" ? commandText.trim() : "";
   switch (normalized) {
     case "login":
     case "accounts":
     case "start":
+    case "doctor":
+    case "help":
+      return `cyberboss ${normalized}`;
     case "shared start":
     case "shared open":
     case "shared status":
-    case "doctor":
-    case "help":
       return `npm run ${normalized.replace(" ", ":")}`;
     case "start --checkin":
-      return "npm run start:checkin";
+      return "cyberboss start --checkin";
     case "reminder write":
-      return "npm run reminder:write -- <args>";
+      return "cyberboss reminder write <args>";
     case "diary write":
-      return "npm run diary:write -- <args>";
+      return "cyberboss diary write <args>";
     case "channel send-file":
-      return "npm run channel:send-file -- --path /absolute/path";
+      return "cyberboss channel send-file --path /absolute/path";
     case "system send":
-      return "npm run system:send -- <args>";
+      return "cyberboss system send <args>";
     case "system checkin-poller":
-      return "npm run system:checkin";
+      return "cyberboss system checkin-poller";
     case "timeline write":
-      return "npm run timeline:write -- <args>";
+      return "cyberboss timeline write <args>";
     case "timeline build":
-      return "npm run timeline:build";
+      return "cyberboss timeline build";
     case "timeline serve":
-      return "npm run timeline:serve";
+      return "cyberboss timeline serve";
     case "timeline dev":
-      return "npm run timeline:dev";
+      return "cyberboss timeline dev";
     case "timeline screenshot":
-      return "npm run timeline:screenshot -- --send";
+      return "cyberboss timeline screenshot --send";
     default:
       return normalized;
   }
+}
+
+function getAgentCyberbossExecutable() {
+  const executable = process.platform === "win32"
+    ? path.resolve(__dirname, "..", "..", "bin", "cyberboss.cmd")
+    : path.resolve(__dirname, "..", "..", "bin", "cyberboss");
+  return executable;
+}
+
+function buildAgentCommandInvocation(args = []) {
+  const executable = getAgentCyberbossExecutable();
+  const normalizedArgs = Array.isArray(args) ? args.map((value) => String(value ?? "")) : [];
+  if (process.platform === "win32") {
+    const innerCommand = [executable, ...normalizedArgs].map(quoteWindowsCmdArg).join(" ");
+    return `cmd /d /s /c ${quoteWindowsCmdArg(innerCommand)}`;
+  }
+  return [executable, ...normalizedArgs].map(quotePosixShellArg).join(" ");
+}
+
+function quotePosixShellArg(value) {
+  const text = String(value ?? "");
+  if (!text.length) {
+    return "''";
+  }
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(text)) {
+    return text;
+  }
+  return `'${text.replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function quoteWindowsCmdArg(value) {
+  const text = String(value ?? "");
+  if (!text.length) {
+    return "\"\"";
+  }
+  if (!/[\s"]/u.test(text)) {
+    return text;
+  }
+  const escaped = text.replace(/(\\*)"/g, "$1$1\\\"");
+  return `"${escaped.replace(/(\\+)$/g, "$1$1")}"`;
 }

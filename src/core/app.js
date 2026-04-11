@@ -7,10 +7,11 @@ const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
-const { buildWeixinHelpText } = require("./command-registry");
+const { buildAgentCommandGuide, buildWeixinHelpText } = require("./command-registry");
 const { resolvePreferredSenderId } = require("./default-targets");
 const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
+const { DeferredSystemReplyStore } = require("./deferred-system-reply-store");
 const { SystemMessageQueueStore } = require("./system-message-queue-store");
 const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
@@ -34,12 +35,14 @@ class CyberbossApp {
     this.timelineIntegration = createTimelineIntegration(config);
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
+    this.deferredSystemReplyQueue = new DeferredSystemReplyStore({ filePath: config.deferredSystemReplyQueueFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
       sessionStore: this.runtimeAdapter.getSessionStore(),
+      onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
     });
     this.pendingRuntimeEventWatchdogs = new Map();
     this.runtimeEventChain = Promise.resolve();
@@ -239,7 +242,41 @@ class CyberbossApp {
       return;
     }
 
+    this.primeDeferredRepliesForSender(normalized);
     await this.handlePreparedMessage(normalized, { allowCommands: true });
+  }
+
+  deferSystemReply({ threadId = "", userId = "", text = "", error = null, kind = "plain_reply" }) {
+    return this.deferredSystemReplyQueue.enqueue({
+      id: `${normalizeCommandArgument(threadId) || "system"}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      accountId: this.activeAccountId || this.channelAdapter.resolveAccount().accountId,
+      senderId: userId,
+      threadId,
+      text,
+      kind,
+      createdAt: new Date().toISOString(),
+      failedAt: new Date().toISOString(),
+      lastError: error instanceof Error ? error.message : String(error || ""),
+    });
+  }
+
+  primeDeferredRepliesForSender(normalized) {
+    if (!normalized?.accountId || !normalized?.senderId || !normalized?.contextToken) {
+      return;
+    }
+    const pendingReplies = this.deferredSystemReplyQueue.drainForSender(normalized.accountId, normalized.senderId);
+    if (!pendingReplies.length) {
+      return;
+    }
+    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+      workspaceId: normalized.workspaceId,
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+    });
+    this.streamDelivery.setDeferredReplyPrefix(bindingKey, formatDeferredSystemReplyBatch(pendingReplies));
+    console.warn(
+      `[cyberboss] queued deferred reply prefix sender=${normalized.senderId} count=${pendingReplies.length}`
+    );
   }
 
   resolveDefaultTerminalUser() {
@@ -397,6 +434,16 @@ class CyberbossApp {
   }
 
   async prepareIncomingMessageForRuntime(normalized, workspaceRoot) {
+    if (normalized?.provider === "system") {
+      return {
+        ...normalized,
+        originalText: normalized.text,
+        text: String(normalized.text || "").trim(),
+        attachments: [],
+        attachmentFailures: [],
+      };
+    }
+
     const attachments = Array.isArray(normalized.attachments) ? normalized.attachments : [];
     if (!attachments.length) {
       return {
@@ -1419,6 +1466,7 @@ function buildCodexInboundText(normalized, persisted = {}, config = {}) {
   const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
   const failed = Array.isArray(persisted?.failed) ? persisted.failed : [];
   const userName = String(config?.userName || "").trim() || "the user";
+  const commandGuide = buildIncomingCommandGuide(normalized, persisted);
   const localTime = formatWechatLocalTime(normalized?.receivedAt);
   const lines = [];
   if (localTime) {
@@ -1455,7 +1503,94 @@ function buildCodexInboundText(normalized, persisted = {}, config = {}) {
     }
   }
 
+  if (commandGuide) {
+    if (lines.length) {
+      lines.push("");
+    }
+    lines.push(commandGuide);
+  }
+
   return lines.join("\n").trim();
+}
+
+function buildIncomingCommandGuide(normalized, persisted = {}) {
+  const topics = detectCommandTopics(normalized, persisted);
+  if (!topics.length) {
+    return "";
+  }
+  return buildAgentCommandGuide(topics);
+}
+
+function detectCommandTopics(normalized, persisted = {}) {
+  const topics = new Set();
+  const text = String(normalized?.text || "").toLowerCase();
+  const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
+
+  if (/(timeline|时间轴|截图|screenshot|dashboard)/u.test(text)) {
+    topics.add("timeline");
+  }
+  if (/(reminder|提醒|稍后|过会|回头|记得|delay|follow up)/u.test(text)) {
+    topics.add("reminder");
+  }
+  if (/(diary|日记|记录一下|写下来|记一笔)/u.test(text)) {
+    topics.add("diary");
+  }
+  if (/(send-file|send file|发文件|发给我|发回|附件)/u.test(text)) {
+    topics.add("channel");
+  }
+  if (saved.length && /(send|发|回传|返回)/u.test(text)) {
+    topics.add("channel");
+  }
+
+  return Array.from(topics);
+}
+
+const DEFERRED_REPLY_NOTICE = "由于微信 context_token 的限制，上轮对话里有一部分内容当时没能送达；这次用户再次发来消息、context_token 刷新后，先把遗留内容补上。";
+const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
+const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
+
+function formatDeferredSystemReplyText(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return DEFERRED_REPLY_NOTICE;
+  }
+  if (normalized.startsWith(DEFERRED_REPLY_NOTICE)) {
+    return normalized;
+  }
+  return `${DEFERRED_REPLY_NOTICE}\n\n${normalized}`;
+}
+
+function formatDeferredSystemReplyBatch(replies) {
+  const grouped = groupDeferredReplies(replies);
+  if (!grouped.plain.length && !grouped.system.length) {
+    return DEFERRED_REPLY_NOTICE;
+  }
+  const parts = [
+    DEFERRED_REPLY_NOTICE,
+  ];
+  if (grouped.plain.length) {
+    parts.push("", DEFERRED_PLAIN_REPLY_HEADER, grouped.plain.join("\n\n"));
+  }
+  if (grouped.system.length) {
+    parts.push("", DEFERRED_SYSTEM_REPLY_HEADER, grouped.system.join("\n\n"));
+  }
+  return parts.join("\n");
+}
+
+function groupDeferredReplies(replies) {
+  const grouped = { plain: [], system: [] };
+  for (const reply of Array.isArray(replies) ? replies : []) {
+    const normalizedText = String(reply?.text || "").trim();
+    if (!normalizedText) {
+      continue;
+    }
+    if (reply?.kind === "system_reply") {
+      grouped.system.push(normalizedText);
+      continue;
+    }
+    grouped.plain.push(normalizedText);
+  }
+  return grouped;
 }
 
 function formatWechatLocalTime(receivedAt) {

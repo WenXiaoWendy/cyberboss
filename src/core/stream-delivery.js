@@ -1,11 +1,21 @@
 const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol-leak-monitor");
 
+const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
+
 class StreamDelivery {
-  constructor({ channelAdapter, sessionStore }) {
+  constructor({ channelAdapter, sessionStore, onDeferredSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
     this.channelAdapter = channelAdapter;
     this.sessionStore = sessionStore;
+    this.onDeferredSystemReply = typeof onDeferredSystemReply === "function" ? onDeferredSystemReply : null;
+    this.systemReplyRetryScheduleMs = Array.isArray(systemReplyRetryScheduleMs) && systemReplyRetryScheduleMs.length
+      ? systemReplyRetryScheduleMs.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value >= 0)
+      : [1_500, 2_500, 4_000, 6_000];
+    this.sameTokenRetryDelayMs = Number.isFinite(sameTokenRetryDelayMs) && sameTokenRetryDelayMs >= 0
+      ? sameTokenRetryDelayMs
+      : 800;
     this.replyTargetByBindingKey = new Map();
     this.replyTargetByThreadId = new Map();
+    this.deferredReplyPrefixByBindingKey = new Map();
     this.stateByRunKey = new Map();
   }
 
@@ -32,6 +42,15 @@ class StreamDelivery {
     };
     this.replyTargetByThreadId.set(normalizedThreadId, normalizedTarget);
     this.bindReplyTargetToActiveThreadRuns(normalizedThreadId, normalizedTarget);
+  }
+
+  setDeferredReplyPrefix(bindingKey, text) {
+    const normalizedBindingKey = normalizeText(bindingKey);
+    const normalizedText = trimOuterBlankLines(normalizeLineEndings(text));
+    if (!normalizedBindingKey || !normalizedText) {
+      return;
+    }
+    this.deferredReplyPrefixByBindingKey.set(normalizedBindingKey, normalizedText);
   }
 
   async handleRuntimeEvent(event) {
@@ -94,6 +113,7 @@ class StreamDelivery {
       threadId,
       bindingKey: "",
       replyTarget: null,
+      deferredReplyPrefix: "",
       turnId: normalizeText(turnId),
       itemOrder: [],
       items: new Map(),
@@ -122,6 +142,13 @@ class StreamDelivery {
     if (!state.replyTarget) {
       const target = this.replyTargetByBindingKey.get(linked.bindingKey);
       state.replyTarget = target;
+    }
+    if (!state.deferredReplyPrefix) {
+      const prefix = this.deferredReplyPrefixByBindingKey.get(linked.bindingKey) || "";
+      if (prefix) {
+        state.deferredReplyPrefix = prefix;
+        this.deferredReplyPrefixByBindingKey.delete(linked.bindingKey);
+      }
     }
   }
 
@@ -200,9 +227,13 @@ class StreamDelivery {
       await this.flushSystemReply(state, { force, replyText });
       return;
     }
+    if (state.deferredReplyPrefix && !force) {
+      return;
+    }
 
     const plainText = markdownToPlainText(replyText);
-    const safeText = sanitizeReplyText(plainText);
+    const baseSafeText = sanitizeReplyText(plainText);
+    const safeText = buildEffectiveReplyText(state.deferredReplyPrefix, baseSafeText);
     if (!safeText || safeText === state.sentText) {
       return;
     }
@@ -224,12 +255,17 @@ class StreamDelivery {
 
     state.sentText = safeText;
     state.sendChain = state.sendChain.then(async () => {
-      await this.channelAdapter.sendText({
+      const payload = {
         userId: state.replyTarget.userId,
         text: delta,
         contextToken: state.replyTarget.contextToken,
-      });
+      };
+      if (state.deferredReplyPrefix) {
+        payload.preserveBlock = true;
+      }
+      await this.channelAdapter.sendText(payload);
     }).catch((error) => {
+      void this.deferSystemReply(state, delta, error, "plain_reply");
       console.error(`[cyberboss] failed to deliver reply thread=${state.threadId}: ${error.message}`);
     });
 
@@ -291,24 +327,65 @@ class StreamDelivery {
     } catch (error) {
       const retryTarget = this.resolveRetriableSystemReplyTarget(initialTarget, error);
       if (!retryTarget) {
+        const deferred = await this.deferSystemReply(state, text, error, "system_reply");
+        if (deferred) {
+          return;
+        }
         throw error;
       }
       console.warn(
         `[cyberboss] system reply retrying with refreshed context token thread=${state.threadId} user=${retryTarget.userId}`
       );
-      await this.channelAdapter.sendText({
-        userId: retryTarget.userId,
-        text,
-        contextToken: retryTarget.contextToken,
-      });
-      state.replyTarget = retryTarget;
-      if (state.bindingKey) {
-        this.replyTargetByBindingKey.set(state.bindingKey, {
+      try {
+        await this.channelAdapter.sendText({
           userId: retryTarget.userId,
+          text,
           contextToken: retryTarget.contextToken,
-          provider: retryTarget.provider,
         });
+        state.replyTarget = retryTarget;
+        if (state.bindingKey) {
+          this.replyTargetByBindingKey.set(state.bindingKey, {
+            userId: retryTarget.userId,
+            contextToken: retryTarget.contextToken,
+            provider: retryTarget.provider,
+          });
+        }
+      } catch (retryError) {
+        const deferred = await this.deferSystemReply(state, text, retryError, "system_reply");
+        if (deferred) {
+          return;
+        }
+        throw retryError;
       }
+    }
+  }
+
+  async deferSystemReply(state, text, error, kind = "plain_reply") {
+    if (typeof this.onDeferredSystemReply !== "function") {
+      return false;
+    }
+    if (!isSystemReplyContextFailure(error)) {
+      return false;
+    }
+    const target = state?.replyTarget || {};
+    if (!target.userId || !text) {
+      return false;
+    }
+    try {
+      await this.onDeferredSystemReply({
+        threadId: state.threadId,
+        userId: target.userId,
+        text,
+        error,
+        kind,
+      });
+      console.warn(
+        `[cyberboss] deferred system reply until the next inbound message thread=${state.threadId} user=${target.userId}`
+      );
+      return true;
+    } catch (deferError) {
+      console.error(`[cyberboss] failed to defer system reply thread=${state.threadId}: ${deferError.message}`);
+      return false;
     }
   }
 
@@ -385,6 +462,15 @@ function buildReplyText(state, { completedOnly }) {
     }
   }
   return parts.join("\n\n");
+}
+
+function buildEffectiveReplyText(deferredPrefix, replyText) {
+  const prefix = trimOuterBlankLines(normalizeLineEndings(deferredPrefix));
+  const body = trimOuterBlankLines(normalizeLineEndings(replyText));
+  if (prefix && body) {
+    return `${prefix}\n\n${CURRENT_REPLY_HEADER}\n${body}`;
+  }
+  return prefix || body;
 }
 
 function markdownToPlainText(text) {
@@ -477,7 +563,8 @@ function resolveSystemReplyAction(replyText) {
     return { kind: "invalid", reason: "final reply is empty" };
   }
 
-  const parsed = tryParseJson(normalized);
+  const candidate = extractSystemActionJsonCandidate(normalized) || normalized;
+  const parsed = tryParseJson(candidate);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
     return { kind: "invalid", reason: "final reply is not a JSON object" };
   }
@@ -503,17 +590,18 @@ function maybeResolveStructuredAction(replyText) {
   if (!normalized) {
     return null;
   }
-  if (!normalized.startsWith("{") || !normalized.endsWith("}")) {
+  const candidate = extractSystemActionJsonCandidate(normalized);
+  if (!candidate) {
     return null;
   }
-  const parsed = tryParseJson(normalized);
+  const parsed = tryParseJson(candidate);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
     return null;
   }
   if (!("action" in parsed) && !("cyberboss_action" in parsed)) {
     return null;
   }
-  return resolveSystemReplyAction(normalized);
+  return resolveSystemReplyAction(candidate);
 }
 
 function normalizeSystemActionName(value) {
@@ -529,6 +617,30 @@ function tryParseJson(value) {
   } catch {
     return null;
   }
+}
+
+function extractSystemActionJsonCandidate(text) {
+  const normalized = normalizeLineEndings(String(text || "")).trim();
+  if (!normalized || !normalized.endsWith("}")) {
+    return "";
+  }
+  if (normalized.startsWith("{")) {
+    return normalized;
+  }
+  for (let index = normalized.lastIndexOf("{"); index >= 0; index = normalized.lastIndexOf("{", index - 1)) {
+    const candidate = normalized.slice(index).trim();
+    if (!candidate.startsWith("{") || !candidate.endsWith("}")) {
+      continue;
+    }
+    const parsed = tryParseJson(candidate);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      continue;
+    }
+    if ("action" in parsed || "cyberboss_action" in parsed) {
+      return candidate;
+    }
+  }
+  return "";
 }
 
 function isSystemReplyContextFailure(error) {

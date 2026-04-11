@@ -30,7 +30,7 @@ class SystemMessageDispatcher {
       threadKey: `system:${message.senderId}`,
       senderId: message.senderId,
       messageId: message.id,
-      text: buildSystemInboundText(message?.text),
+      text: buildSystemInboundText(message?.text, message?.createdAt),
       attachments: [],
       command: "message",
       contextToken,
@@ -40,11 +40,12 @@ class SystemMessageDispatcher {
   }
 }
 
-function buildSystemInboundText(text) {
+function buildSystemInboundText(text, createdAt = "") {
   const body = normalizeText(text);
+  const localTime = formatSystemLocalTime(createdAt);
   const sections = [
-    "SYSTEM ACTION MODE",
-    "System trigger, not user chat.",
+    ...(localTime ? [`[${localTime}]`, ""] : []),
+    "SYSTEM ACTION MODE: internal trigger, not user chat.",
     "Do any timeline/diary/reminder work in this turn.",
     "If you act, end with send_message that briefly and naturally reflects what you did or what changed; use silent only if you do nothing.",
     "Return exactly one JSON object after any tool calls:",
@@ -56,6 +57,22 @@ function buildSystemInboundText(text) {
     sections.push("", "Trigger:", body);
   }
   return sections.join("\n").trim();
+}
+
+function formatSystemLocalTime(value) {
+  const normalized = normalizeIsoTime(value);
+  if (!normalized) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(normalized)).replace(/\//g, "-");
 }
 
 function normalizeIsoTime(value) {

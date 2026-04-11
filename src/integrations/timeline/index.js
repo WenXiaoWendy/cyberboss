@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const os = require("os");
@@ -21,9 +22,11 @@ function createTimelineIntegration(config) {
       if (!normalizedSubcommand) {
         throw new Error("timeline subcommand cannot be empty");
       }
-      return runTimelineCommand(binPath, [normalizedSubcommand, ...normalizeArgs(args)], {
+      const prepared = prepareTimelineInvocation(normalizedSubcommand, args);
+      return runTimelineCommand(binPath, [normalizedSubcommand, ...prepared.args], {
         TIMELINE_FOR_AGENT_STATE_DIR: config.stateDir,
         TIMELINE_FOR_AGENT_CHROME_PATH: resolveTimelineChromePath(),
+        ...prepared.extraEnv,
       }, {
         subcommand: normalizedSubcommand,
       });
@@ -124,6 +127,66 @@ function normalizeArgs(args) {
     : [];
 }
 
+function prepareTimelineInvocation(subcommand, args = []) {
+  const normalizedSubcommand = normalizeText(subcommand);
+  const normalizedArgs = normalizeArgs(args);
+  const preparedArgs = [];
+  const extraEnv = {};
+  let sawJsonArgument = false;
+  let sawEventsSource = false;
+
+  for (let index = 0; index < normalizedArgs.length; index += 1) {
+    const token = normalizedArgs[index];
+    const next = normalizedArgs[index + 1];
+
+    if (token === "--locale") {
+      if (!next || next.startsWith("--")) {
+        throw new Error("Missing value for argument: --locale");
+      }
+      extraEnv.TIMELINE_FOR_AGENT_LOCALE = next;
+      index += 1;
+      continue;
+    }
+
+    if (normalizedSubcommand === "write" && token === "--events-json") {
+      if (!next || next.startsWith("--")) {
+        throw new Error("Missing value for argument: --events-json");
+      }
+      if (sawJsonArgument || sawEventsSource) {
+        throw new Error("Use only one of --json, --events-json, or --events-file");
+      }
+      preparedArgs.push("--json", next);
+      sawEventsSource = true;
+      index += 1;
+      continue;
+    }
+
+    if (normalizedSubcommand === "write" && token === "--events-file") {
+      if (!next || next.startsWith("--")) {
+        throw new Error("Missing value for argument: --events-file");
+      }
+      if (sawJsonArgument || sawEventsSource) {
+        throw new Error("Use only one of --json, --events-json, or --events-file");
+      }
+      preparedArgs.push("--json", fs.readFileSync(path.resolve(next), "utf8"));
+      sawEventsSource = true;
+      index += 1;
+      continue;
+    }
+
+    if (normalizedSubcommand === "write" && token === "--json") {
+      if (sawEventsSource) {
+        throw new Error("Use only one of --json, --events-json, or --events-file");
+      }
+      sawJsonArgument = true;
+    }
+
+    preparedArgs.push(token);
+  }
+
+  return { args: preparedArgs, extraEnv };
+}
+
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -152,4 +215,7 @@ function detectTimelineWriteFailure(stdout, stderr) {
   return "";
 }
 
-module.exports = { createTimelineIntegration };
+module.exports = {
+  createTimelineIntegration,
+  prepareTimelineInvocation,
+};

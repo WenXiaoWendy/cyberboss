@@ -3,6 +3,11 @@ const assert = require("node:assert/strict");
 
 const { StreamDelivery } = require("../src/core/stream-delivery");
 
+const DEFERRED_REPLY_NOTICE = "由于微信 context_token 的限制，上轮对话里有一部分内容当时没能送达；这次用户再次发来消息、context_token 刷新后，先把遗留内容补上。";
+const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
+const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
+const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
+
 function createHarness({ sendText, getKnownContextTokens } = {}) {
   const sent = [];
   const channelAdapter = {
@@ -148,7 +153,7 @@ test("plain weixin reply still strips protocol leak text", async () => {
   });
 });
 
-test("system send_message retries once with the latest context token on ret=-2", async () => {
+test("system send_message retries with the latest context token on ret=-2", async () => {
   const attempts = [];
   const { sent, streamDelivery } = createHarness({
     async sendText(payload, successful) {
@@ -193,4 +198,111 @@ test("system send_message retries once with the latest context token on ret=-2",
     text: "回来啦",
     contextToken: "ctx-fresh",
   }]);
+});
+
+test("system send_message is deferred after retry exhaustion", async () => {
+  const deferred = [];
+  const { sent, streamDelivery } = createHarness({
+    async sendText() {
+      const error = new Error("sendMessage ret=-2 errcode= errmsg=");
+      error.ret = -2;
+      throw error;
+    },
+    getKnownContextTokens() {
+      return { "user-6": "ctx-stale" };
+    },
+  });
+  streamDelivery.onDeferredSystemReply = async (payload) => {
+    deferred.push(payload);
+  };
+  streamDelivery.queueReplyTargetForThread("thread-6", {
+    userId: "user-6",
+    contextToken: "ctx-stale",
+    provider: "system",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-6",
+    turnId: "turn-6",
+    itemId: "item-6",
+    text: "{\"action\":\"send_message\",\"message\":\"等等我\"}",
+  });
+
+  assert.deepEqual(sent, []);
+  assert.equal(deferred.length, 1);
+  assert.equal(deferred[0].threadId, "thread-6");
+  assert.equal(deferred[0].userId, "user-6");
+  assert.equal(deferred[0].text, "等等我");
+});
+
+test("plain reply prepends deferred prefix to the next reply", async () => {
+  const { sent, streamDelivery, bindingByThreadId } = createHarness();
+  bindingByThreadId.set("thread-7", { bindingKey: "binding-7" });
+  streamDelivery.setReplyTarget("binding-7", {
+    userId: "user-7",
+    contextToken: "ctx-7",
+    provider: "weixin",
+  });
+  streamDelivery.setDeferredReplyPrefix(
+    "binding-7",
+    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
+  );
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-7",
+    turnId: "turn-7",
+    itemId: "item-7",
+    text: "这是新一轮自动回复",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    userId: "user-7",
+    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n这是新一轮自动回复`,
+    contextToken: "ctx-7",
+    preserveBlock: true,
+  });
+});
+
+test("plain reply with deferred prefix waits until turn completion before sending", async () => {
+  const { sent, streamDelivery, bindingByThreadId } = createHarness();
+  bindingByThreadId.set("thread-8", { bindingKey: "binding-8" });
+  streamDelivery.setReplyTarget("binding-8", {
+    userId: "user-8",
+    contextToken: "ctx-8",
+    provider: "weixin",
+  });
+  streamDelivery.setDeferredReplyPrefix(
+    "binding-8",
+    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
+  );
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.started",
+    payload: { threadId: "thread-8", turnId: "turn-8" },
+  });
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.reply.completed",
+    payload: {
+      threadId: "thread-8",
+      turnId: "turn-8",
+      itemId: "item-8",
+      text: "第一段",
+    },
+  });
+
+  assert.deepEqual(sent, []);
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.completed",
+    payload: { threadId: "thread-8", turnId: "turn-8" },
+  });
+
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    userId: "user-8",
+    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n第一段`,
+    contextToken: "ctx-8",
+    preserveBlock: true,
+  });
 });

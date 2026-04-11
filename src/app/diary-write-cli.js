@@ -6,7 +6,7 @@ async function runDiaryWriteCommand(config) {
   const options = parseArgs(args);
   const body = await resolveBody(options);
   if (!body) {
-    throw new Error("Diary content cannot be empty. Pass --text or provide input through stdin.");
+    throw new Error("Diary content cannot be empty. Pass --text, --text-file, or provide input through stdin.");
   }
 
   const now = new Date();
@@ -28,6 +28,7 @@ async function runDiaryWriteCommand(config) {
 function parseArgs(args) {
   const options = {
     text: "",
+    textFile: "",
     title: "",
     date: "",
     time: "",
@@ -37,6 +38,11 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--text") {
       options.text = String(args[index + 1] || "");
+      index += 1;
+      continue;
+    }
+    if (arg === "--text-file") {
+      options.textFile = String(args[index + 1] || "");
       index += 1;
       continue;
     }
@@ -69,10 +75,22 @@ async function resolveBody(options) {
   if (inlineText) {
     return inlineText;
   }
+  const fileText = readTextFile(options.textFile);
+  if (fileText) {
+    return fileText;
+  }
   if (!options.useStdin && process.stdin.isTTY) {
     return "";
   }
   return normalizeBody(await readStdin());
+}
+
+function readTextFile(filePath) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return "";
+  }
+  return normalizeBody(fs.readFileSync(normalizedPath, "utf8"));
 }
 
 function readStdin() {
@@ -114,4 +132,8 @@ function formatTime(date) {
   }).format(date);
 }
 
-module.exports = { runDiaryWriteCommand };
+module.exports = {
+  parseArgs,
+  resolveBody,
+  runDiaryWriteCommand,
+};

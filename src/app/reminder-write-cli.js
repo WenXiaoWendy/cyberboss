@@ -1,3 +1,4 @@
+const fs = require("fs");
 const crypto = require("crypto");
 
 const { resolveSelectedAccount } = require("../adapters/channel/weixin/account-store");
@@ -19,7 +20,7 @@ async function runReminderWriteCommand(config) {
   const options = parseArgs(args);
   const body = await resolveBody(options);
   if (!body) {
-    throw new Error("Reminder text cannot be empty. Pass --text or provide input through stdin.");
+    throw new Error("Reminder text cannot be empty. Pass --text, --text-file, or provide input through stdin.");
   }
 
   const dueAtMs = resolveDueAtMs(options);
@@ -63,6 +64,7 @@ function parseArgs(args) {
     delay: "",
     at: "",
     text: "",
+    textFile: "",
     user: "",
     useStdin: false,
   };
@@ -80,6 +82,11 @@ function parseArgs(args) {
     }
     if (arg === "--text") {
       options.text = String(args[index + 1] || "");
+      index += 1;
+      continue;
+    }
+    if (arg === "--text-file") {
+      options.textFile = String(args[index + 1] || "");
       index += 1;
       continue;
     }
@@ -185,10 +192,22 @@ async function resolveBody(options) {
   if (inlineText) {
     return inlineText;
   }
+  const fileText = readTextFile(options.textFile);
+  if (fileText) {
+    return fileText;
+  }
   if (!options.useStdin && process.stdin.isTTY) {
     return "";
   }
   return normalizeBody(await readStdin());
+}
+
+function readTextFile(filePath) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return "";
+  }
+  return normalizeBody(fs.readFileSync(normalizedPath, "utf8"));
 }
 
 function readStdin() {
@@ -207,4 +226,8 @@ function normalizeBody(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();
 }
 
-module.exports = { runReminderWriteCommand };
+module.exports = {
+  parseArgs,
+  resolveBody,
+  runReminderWriteCommand,
+};
