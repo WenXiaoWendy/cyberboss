@@ -133,7 +133,7 @@ npm install
 ```dotenv
 CYBERBOSS_USER_NAME=你的名字
 CYBERBOSS_USER_GENDER=female
-CYBERBOSS_ALLOWED_USER_IDS=你的微信 user id
+CYBERBOSS_ALLOWED_USER_IDS=桥实际看到的 sender id
 CYBERBOSS_WORKSPACE_ROOT=/绝对路径/你的项目目录
 ```
 
@@ -142,19 +142,27 @@ CYBERBOSS_WORKSPACE_ROOT=/绝对路径/你的项目目录
 ```dotenv
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
+CYBERBOSS_TIMEZONE=America/New_York
 CYBERBOSS_WEIXIN_ADAPTER=v2
 ```
 
-`CYBERBOSS_ALLOWED_USER_IDS` 支持逗号分隔多个 user id。
+`CYBERBOSS_ALLOWED_USER_IDS` 支持逗号分隔多个 sender id。
 
 原因有两个：
 
 - 第一次运行任意 `cyberboss` 命令时，会自动生成 `~/.cyberboss/weixin-instructions.md`
 - 如果你没先设置 `CYBERBOSS_USER_NAME` 和 `CYBERBOSS_USER_GENDER`，生成出来的 instructions 可能不符合真实情况
 
+这两个字段的含义：
+
+- `CYBERBOSS_USER_NAME` 是 agent 在聊天里怎么称呼你。它是显示/人设字段，不参与消息路由。
+- `CYBERBOSS_ALLOWED_USER_IDS` 必须填写微信桥实际观测到的 sender id。最简单的做法是运行 `npm run accounts`，使用其中列出的 id。不要填昵称、显示名，或你自己猜的微信号。
+
 另外，如果你想要更强的“push 感”，建议一开始先不要主动大改 instructions 模板。先让 agent 在真实交流里自己更新行为，再回头只修明显不对的部分。
 
 如果你要跑共享线程，建议也在第一次启动前就把 `CYBERBOSS_WORKSPACE_ROOT` 配好。这样 `shared:open` 会优先接到你当前项目对应的那条线程，而不是回退到别的历史绑定。
+
+`CYBERBOSS_TIMEZONE` 是可选项。不设时，Cyberboss 默认使用系统时区。timeline 的日期校验和 diary 时间戳都会跟这个时区走；如果本地 timeline state 还是旧的默认时区，下一次执行 timeline 命令时会自动同步过去。
 
 ### 用户自己会用到的终端命令
 
@@ -282,16 +290,23 @@ ${HOME}/.cyberboss
 
 ### Agent 常用命令
 
+- `npm run timeline:categories`
+  打印当前 taxonomy 和 eventNode；如果不确定 `categoryId`、`subcategoryId` 或 `eventNodeId`，先跑这个
 - `npm run reminder:write -- --delay 30m --text "提醒内容"`
   给未来的自己留 reminder
 - `npm run reminder:write -- --at "2026-04-07 21:30" --text "提醒内容"`
   写明确时间点 reminder
+  这个命令要求当前选中的 sender id 已经有可用的 `context_token`；如果没有，就应该直接失败，不要猜另一个 sender
 - `npm run diary:write -- --title 标题 --text "内容"`
   写本地日记
 - `npm run diary:write -- --date 2026-04-06 --title "4.6" --text "内容"`
   写指定日期日记
-- `npm run timeline:write -- --date YYYY-MM-DD --stdin`
-  增量写入时间轴
+- `npm run timeline:write -- --date YYYY-MM-DD --json '{"events":[...]}'
+  增量写入时间轴；如果用 `--stdin`，传完整 JSON 对象 `{"events":[...]}`，不要传裸数组
+  每条事件都必须带合法的 `startAt` 和 `endAt` 绝对时间戳，例如 `2026-04-10T09:00:00+08:00`；同时要求 `endAt > startAt`，而且两个时间都必须落在 `--date` 对应的那一天内
+  每条事件还必须提供 `eventNodeId`，或者提供能推导分类的 `subcategoryId`；最稳妥的写法是显式同时传 `categoryId` 和 `subcategoryId`
+  如果分类 id 不确定，先执行 `npm run timeline:categories`
+  示例：`npm run timeline:write -- --date 2026-04-10 --json '{"events":[{"id":"evt_1","startAt":"2026-04-10T09:00:00+08:00","endAt":"2026-04-10T09:30:00+08:00","title":"早餐","categoryId":"life","subcategoryId":"life.daily"}]}'`
 - `npm run timeline:build`
   构建时间轴静态页面
 - `npm run timeline:serve`

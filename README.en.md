@@ -130,7 +130,7 @@ Before running the first command, set at least:
 ```dotenv
 CYBERBOSS_USER_NAME=YourName
 CYBERBOSS_USER_GENDER=female
-CYBERBOSS_ALLOWED_USER_IDS=your_wechat_user_id
+CYBERBOSS_ALLOWED_USER_IDS=bridge_observed_sender_id
 CYBERBOSS_WORKSPACE_ROOT=/absolute/path/to/your/project
 ```
 
@@ -139,6 +139,7 @@ Common optional variables:
 ```dotenv
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
+CYBERBOSS_TIMEZONE=America/New_York
 CYBERBOSS_WEIXIN_ADAPTER=v2
 ```
 
@@ -147,9 +148,16 @@ Why this matters:
 - the first `cyberboss` command auto-generates `~/.cyberboss/weixin-instructions.md`
 - if `CYBERBOSS_USER_NAME` and `CYBERBOSS_USER_GENDER` are missing, that generated persona file may start from the wrong assumptions
 
+Meaning of these fields:
+
+- `CYBERBOSS_USER_NAME` is how Cyberboss addresses you in chat. It is a display/persona field, not a routing id.
+- `CYBERBOSS_ALLOWED_USER_IDS` must contain the exact sender ids observed by the WeChat bridge. Use the value exactly as stored in `~/.cyberboss/accounts/*.context-tokens.json` or `~/.cyberboss/sessions.json`. Do not put a nickname, display name, or a guessed WeChat handle here.
+
 If you want the strongest "push" effect, do not immediately rewrite the persona template by hand. Let the agent develop its rhythm through real conversation first, then edit only the parts that are clearly wrong.
 
 If you plan to use shared mode, set `CYBERBOSS_WORKSPACE_ROOT` before the first start so `shared:open` resolves the right thread for the right project.
+
+`CYBERBOSS_TIMEZONE` is optional. If you leave it unset, Cyberboss uses your system timezone. Timeline day validation and diary timestamps should follow that timezone. Existing timeline state created under the old default timezone is auto-synced the next time you run a timeline command.
 
 ### Terminal commands for end users
 
@@ -275,16 +283,23 @@ The following commands are primarily for agents and automations, not the main da
 
 ### Common agent commands
 
+- `npm run timeline:categories`
+  Print the current taxonomy and eventNodes; use this first if `categoryId`, `subcategoryId`, or `eventNodeId` is unclear
 - `npm run reminder:write -- --delay 30m --text "Reminder text"`
   Write a reminder for the future self
 - `npm run reminder:write -- --at "2026-04-07 21:30" --text "Reminder text"`
   Write a reminder at an explicit time
+  This command requires the selected sender id to already have a known `context_token`; if not, it should fail instead of guessing another sender
 - `npm run diary:write -- --title Title --text "Content"`
   Write a local diary entry
 - `npm run diary:write -- --date 2026-04-06 --title "4.6" --text "Content"`
   Write a diary entry into a specific date file
-- `npm run timeline:write -- --date YYYY-MM-DD --stdin`
-  Incrementally write timeline events
+- `npm run timeline:write -- --date YYYY-MM-DD --json '{"events":[...]}'
+  Incrementally write timeline events; if you use `--stdin`, pass a full JSON object like `{"events":[...]}`, not a raw array
+  Each event must include valid `startAt` and `endAt` absolute timestamps such as `2026-04-10T09:00:00+08:00`, with `endAt > startAt`, and both timestamps must fall on the same calendar day as `--date`
+  Each event must also include either `eventNodeId`, or `subcategoryId` with a resolvable category; explicitly passing both `categoryId` and `subcategoryId` is the safest form
+  If classification ids are unclear, run `npm run timeline:categories` first
+  Example: `npm run timeline:write -- --date 2026-04-10 --json '{"events":[{"id":"evt_1","startAt":"2026-04-10T09:00:00+08:00","endAt":"2026-04-10T09:30:00+08:00","title":"Breakfast","categoryId":"life","subcategoryId":"life.daily"}]}'`
 - `npm run timeline:build`
   Build the static timeline site
 - `npm run timeline:serve`
