@@ -134,9 +134,12 @@ npm install
 ```dotenv
 CYBERBOSS_USER_NAME=你的名字
 CYBERBOSS_USER_GENDER=female
+CYBERBOSS_USER_TIMEZONE=Asia/Shanghai
 CYBERBOSS_ALLOWED_USER_IDS=你的微信 user id
 CYBERBOSS_WORKSPACE_ROOT=/绝对路径/你的项目目录
 ```
+
+`CYBERBOSS_USER_TIMEZONE` 是必填项。请把它设为用户当前所在时区的 IANA 名称。它决定了传入消息时间会以什么时区展示给 runtime。如果用户出差、旅行或搬到新时区，继续使用前请先更新它。
 
 可选常用项：
 

@@ -1,5 +1,6 @@
 const os = require("os");
 const path = require("path");
+const { assertValidUserTimezone } = require("./user-timezone");
 
 function readConfig() {
   const argv = process.argv.slice(2);
@@ -14,6 +15,7 @@ function readConfig() {
     workspaceRoot: readTextEnv("CYBERBOSS_WORKSPACE_ROOT") || process.cwd(),
     userName: readTextEnv("CYBERBOSS_USER_NAME") || "User",
     userGender: readTextEnv("CYBERBOSS_USER_GENDER") || "female",
+    userTimezone: assertValidUserTimezone(readTextEnv("CYBERBOSS_USER_TIMEZONE")),
     allowedUserIds: readListEnv("CYBERBOSS_ALLOWED_USER_IDS"),
     channel: readTextEnv("CYBERBOSS_CHANNEL") || "weixin",
     runtime: readTextEnv("CYBERBOSS_RUNTIME") || "codex",

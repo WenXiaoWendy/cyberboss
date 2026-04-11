@@ -18,6 +18,7 @@ const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
+const { buildCodexInboundText: buildBaseCodexInboundText } = require("./codex-inbound-text");
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -1228,7 +1229,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-module.exports = { CyberbossApp };
+module.exports = {
+  CyberbossApp,
+};
 
 function parseChannelCommand(text) {
   const normalized = typeof text === "string" ? text.trim() : "";
@@ -1500,55 +1503,15 @@ function buildReminderSystemTrigger(reminder, config = {}) {
 }
 
 function buildCodexInboundText(normalized, persisted = {}, config = {}) {
-  const text = String(normalized?.text || "").trim();
-  const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
-  const failed = Array.isArray(persisted?.failed) ? persisted.failed : [];
-  const userName = String(config?.userName || "").trim() || "the user";
+  const text = buildBaseCodexInboundText(normalized, persisted, config);
   const commandGuide = buildIncomingCommandGuide(normalized, persisted);
-  const localTime = formatWechatLocalTime(normalized?.receivedAt);
-  const lines = [];
-  if (localTime) {
-    lines.push(`[${localTime}]`);
+  if (!commandGuide) {
+    return text;
   }
-  if (text) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push(text);
+  if (!text) {
+    return commandGuide;
   }
-
-  if (saved.length) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push(`${userName} sent image/file attachments. They were saved under the local data directory:`);
-    for (const item of saved) {
-      const suffix = item.sourceFileName ? ` (original name: ${item.sourceFileName})` : "";
-      lines.push(`- [${item.kind}] ${item.absolutePath}${suffix}`);
-    }
-    lines.push(`You must read these files before replying to ${userName}. Do not skip the read step.`);
-    lines.push(`If the required local tool is missing, tell ${userName} exactly what is missing and that you cannot read the file yet. Do not pretend you already read it.`);
-  }
-
-  if (failed.length) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push("Attachment intake errors:");
-    for (const item of failed) {
-      const label = item.sourceFileName || item.kind || "attachment";
-      lines.push(`- ${label}: ${item.reason}`);
-    }
-  }
-
-  if (commandGuide) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push(commandGuide);
-  }
-
-  return lines.join("\n").trim();
+  return `${text}\n\n${commandGuide}`;
 }
 
 function buildIncomingCommandGuide(normalized, persisted = {}) {
@@ -1629,26 +1592,6 @@ function groupDeferredReplies(replies) {
     grouped.plain.push(normalizedText);
   }
   return grouped;
-}
-
-function formatWechatLocalTime(receivedAt) {
-  const value = typeof receivedAt === "string" ? receivedAt.trim() : "";
-  if (!value) {
-    return "";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(parsed).replace(/\//g, "-");
 }
 
 function stringifyRpcId(value) {

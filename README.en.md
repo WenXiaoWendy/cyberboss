@@ -129,9 +129,12 @@ Before running the first command, set at least:
 ```dotenv
 CYBERBOSS_USER_NAME=YourName
 CYBERBOSS_USER_GENDER=female
+CYBERBOSS_USER_TIMEZONE=Asia/Shanghai
 CYBERBOSS_ALLOWED_USER_IDS=your_wechat_user_id
 CYBERBOSS_WORKSPACE_ROOT=/absolute/path/to/your/project
 ```
+
+`CYBERBOSS_USER_TIMEZONE` is required. Set it to the user's current IANA timezone. It controls how inbound message times are shown to the runtime. If the user travels to a new timezone, update it before continuing to use Cyberboss.
 
 Common optional variables:
 
