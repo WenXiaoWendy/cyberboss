@@ -172,6 +172,14 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "timeline.categories",
+        summary: "查看当前可用的 timeline 分类和 eventNode",
+        terminal: ["timeline categories"],
+        terminalGroup: "timeline",
+        weixin: [],
+        status: "active",
+      },
+      {
         action: "timeline.write",
         summary: "将当前上下文写入时间轴",
         terminal: ["timeline write"],
@@ -401,9 +409,10 @@ function buildTopicUsage(topic) {
       return "npm run system:send -- <args> / npm run system:checkin";
     case "timeline":
       return [
-        "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot -- --send",
+        "npm run timeline:categories / npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot -- --send",
         "",
         "补充：",
+        "  如果不确定 categoryId / subcategoryId / eventNodeId，先执行 npm run timeline:categories",
         "  timeline 截图稳定入口是 npm run timeline:screenshot -- --send，它会把任务交给当前微信桥执行",
       ].join("\n");
     default:
@@ -437,6 +446,8 @@ function toNpmRunExample(commandText) {
       return "npm run system:checkin";
     case "timeline write":
       return "npm run timeline:write -- <args>";
+    case "timeline categories":
+      return "npm run timeline:categories";
     case "timeline build":
       return "npm run timeline:build";
     case "timeline serve":
