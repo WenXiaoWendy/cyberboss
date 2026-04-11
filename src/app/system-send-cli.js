@@ -33,25 +33,25 @@ async function runSystemSendCommand(config) {
   });
   if (!senderId || !text || !workspaceRoot) {
     printSystemSendHelp();
-    throw new Error("system send 缺少必要参数");
+    throw new Error("system send is missing required arguments");
   }
   if (!path.isAbsolute(workspaceRoot)) {
-    throw new Error(`workspace 必须是绝对路径: ${workspaceRoot}`);
+    throw new Error(`workspace must be an absolute path: ${workspaceRoot}`);
   }
 
   let workspaceStats = null;
   try {
     workspaceStats = fs.statSync(workspaceRoot);
   } catch {
-    throw new Error(`workspace 不存在: ${workspaceRoot}`);
+    throw new Error(`workspace does not exist: ${workspaceRoot}`);
   }
   if (!workspaceStats.isDirectory()) {
-    throw new Error(`workspace 不是目录: ${workspaceRoot}`);
+    throw new Error(`workspace is not a directory: ${workspaceRoot}`);
   }
 
   const contextTokens = loadPersistedContextTokens(config, account.accountId);
   if (!contextTokens[senderId]) {
-    throw new Error(`找不到用户 ${senderId} 的 context token，先让这个用户和 bot 聊过一次`);
+    throw new Error(`Cannot find a context token for user ${senderId}. Let this user talk to the bot once first.`);
   }
   const queue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
   const queued = queue.enqueue({
@@ -88,13 +88,13 @@ function parseSystemSendArgs(args) {
     }
 
     if (!token.startsWith("--")) {
-      throw new Error(`未知参数: ${token}`);
+      throw new Error(`Unknown argument: ${token}`);
     }
 
     const key = token.slice(2);
     const value = String(args[index + 1] || "");
     if (!value || value.startsWith("--")) {
-      throw new Error(`参数缺少值: ${token}`);
+      throw new Error(`Missing value for argument: ${token}`);
     }
 
     if (key === "user") {
@@ -104,7 +104,7 @@ function parseSystemSendArgs(args) {
     } else if (key === "workspace") {
       options.workspace = value.trim();
     } else {
-      throw new Error(`未知参数: ${token}`);
+      throw new Error(`Unknown argument: ${token}`);
     }
 
     index += 1;
@@ -115,10 +115,10 @@ function parseSystemSendArgs(args) {
 
 function printSystemSendHelp() {
   console.log(`
-用法: npm run system:send -- --text "<message>" [--user <wechat_user_id>] [--workspace /绝对路径]
+Usage: npm run system:send -- --text "<message>" [--user <wechat_user_id>] [--workspace /absolute/path]
 
-示例:
-  npm run system:send -- --text "提醒她今天早点睡" --workspace "$(pwd)"
+Example:
+  npm run system:send -- --text "Remind her to sleep earlier tonight" --workspace "$(pwd)"
 `);
 }
 

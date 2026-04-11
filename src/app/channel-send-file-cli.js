@@ -7,7 +7,7 @@ async function runChannelSendFileCommand(app) {
 
   const options = parseArgs(args);
   if (!options.path) {
-    throw new Error("缺少 --path，指定要发回微信的本地文件路径");
+    throw new Error("Missing --path. Provide the local file path to send back to WeChat.");
   }
 
   const result = await app.sendLocalFileToCurrentChat({
@@ -35,7 +35,7 @@ function parseArgs(args) {
       index += 1;
       continue;
     }
-    throw new Error(`未知参数: ${arg}`);
+    throw new Error(`Unknown argument: ${arg}`);
   }
 
   return options;
@@ -43,13 +43,13 @@ function parseArgs(args) {
 
 function printHelp() {
   console.log([
-    "用法: npm run channel:send-file -- --path /绝对路径 [--user <wechatUserId>]",
+    "Usage: npm run channel:send-file -- --path /absolute/path [--user <wechatUserId>]",
     "",
-    "参数：",
-    "  --path /绝对路径         要发回当前微信聊天的本地文件",
-    "  --user <wechatUserId>   可选，覆盖默认接收用户",
+    "Arguments:",
+    "  --path /absolute/path    local file to send back to the current WeChat chat",
+    "  --user <wechatUserId>   optional, overrides the default receiver",
     "",
-    "示例：",
+    "Example:",
     "  npm run channel:send-file -- --path /Users/name/project/README.md",
   ].join("\n"));
 }

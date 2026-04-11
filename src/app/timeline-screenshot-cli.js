@@ -23,7 +23,7 @@ async function runTimelineScreenshotCommand(config, args = process.argv.slice(4)
   });
 
   if (!senderId) {
-    throw new Error("缺少发送目标，传 --user 或配置 CYBERBOSS_ALLOWED_USER_IDS");
+    throw new Error("Missing send target. Pass --user or configure CYBERBOSS_ALLOWED_USER_IDS.");
   }
 
   const queue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
@@ -66,7 +66,7 @@ function parseTimelineScreenshotArgs(args) {
     if (token === "--user") {
       const value = String(args[index + 1] || "").trim();
       if (!value || value.startsWith("--")) {
-        throw new Error("参数缺少值: --user");
+        throw new Error("Missing value for argument: --user");
       }
       options.user = value;
       index += 1;
@@ -75,7 +75,7 @@ function parseTimelineScreenshotArgs(args) {
     if (token === "--output") {
       const value = String(args[index + 1] || "").trim();
       if (!value || value.startsWith("--")) {
-        throw new Error("参数缺少值: --output");
+        throw new Error("Missing value for argument: --output");
       }
       options.outputFile = path.resolve(value);
       index += 1;
@@ -95,12 +95,12 @@ function parseTimelineScreenshotArgs(args) {
 
 function printTimelineScreenshotHelp() {
   console.log(`
-用法: npm run timeline:screenshot -- --send [--user <wechatUserId>] [--output /绝对路径] [其他 timeline screenshot 参数]
+Usage: npm run timeline:screenshot -- --send [--user <wechatUserId>] [--output /absolute/path] [other timeline screenshot args]
 
-说明:
-  这条命令只负责把截图任务排进本地队列，真正截图由正在运行的微信 bridge 执行。
+Notes:
+  This command only queues the screenshot job locally. The actual screenshot is taken by the running WeChat bridge.
 
-示例:
+Example:
   npm run timeline:screenshot -- --send --selector timeline
 `);
 }

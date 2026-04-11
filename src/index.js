@@ -65,7 +65,7 @@ function ensureInstructionsTemplate(config) {
     return;
   }
 
-  const userName = String(config?.userName || "").trim() || "用户";
+  const userName = String(config?.userName || "").trim() || "User";
   const content = renderInstructionTemplate(template, {
     ...config,
     userName,
@@ -198,7 +198,7 @@ async function main() {
     return;
   }
 
-  throw new Error(`未知命令: ${command}`);
+  throw new Error(`Unknown command: ${command}`);
 }
 
 module.exports = { main };

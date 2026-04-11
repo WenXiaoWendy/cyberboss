@@ -21,7 +21,7 @@ async function fetchQrCode(apiBaseUrl, botType) {
   const response = await fetch(url.toString());
   if (!response.ok) {
     const body = await response.text().catch(() => "(unreadable)");
-    throw new Error(`二维码获取失败: ${response.status} ${response.statusText} ${redactSensitiveText(body)}`);
+    throw new Error(`Failed to fetch QR code: ${response.status} ${response.statusText} ${redactSensitiveText(body)}`);
   }
   return response.json();
 }
@@ -41,7 +41,7 @@ async function pollQrStatus(apiBaseUrl, qrcode) {
     clearTimeout(timer);
     const rawText = await response.text();
     if (!response.ok) {
-      throw new Error(`二维码状态轮询失败: ${response.status} ${response.statusText} ${redactSensitiveText(rawText)}`);
+      throw new Error(`QR status polling failed: ${response.status} ${response.statusText} ${redactSensitiveText(rawText)}`);
     }
     return JSON.parse(rawText);
   } catch (error) {
@@ -56,7 +56,7 @@ async function pollQrStatus(apiBaseUrl, qrcode) {
 function printQrCode(url) {
   try {
     qrcodeTerminal.generate(url, { small: true });
-    console.log("如果二维码未能成功展示，请用浏览器打开以下链接扫码：");
+    console.log("If the QR code does not render correctly here, open this link in a browser and scan it there:");
     console.log(url);
   } catch {
     console.log(url);
@@ -87,9 +87,9 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
   let scannedPrinted = false;
   let refreshCount = 1;
 
-  console.log("使用微信扫描以下二维码，以完成连接：\n");
+  console.log("Scan this QR code with WeChat to connect:\n");
   printQrCode(qrResponse.qrcode_img_content);
-  console.log("\n等待连接结果...\n");
+  console.log("\nWaiting for the connection result...\n");
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -99,9 +99,9 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
       scannedPrinted = false;
       refreshCount += 1;
       if (refreshCount > MAX_QR_REFRESH_COUNT) {
-        throw new Error("二维码多次过期，请重新执行 login");
+        throw new Error("The QR code expired too many times. Run login again.");
       }
-      console.log(`二维码已过期，正在刷新...(${refreshCount}/${MAX_QR_REFRESH_COUNT})\n`);
+      console.log(`QR code expired. Refreshing... (${refreshCount}/${MAX_QR_REFRESH_COUNT})\n`);
       printQrCode(qrResponse.qrcode_img_content);
     }
 
@@ -112,7 +112,7 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
         break;
       case "scaned":
         if (!scannedPrinted) {
-          process.stdout.write("\n已扫码，请在微信中确认授权...\n");
+          process.stdout.write("\nQR code scanned. Confirm the login inside WeChat...\n");
           scannedPrinted = true;
         }
         break;
@@ -122,14 +122,14 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
         scannedPrinted = false;
         refreshCount += 1;
         if (refreshCount > MAX_QR_REFRESH_COUNT) {
-          throw new Error("二维码多次过期，请重新执行 login");
+          throw new Error("The QR code expired too many times. Run login again.");
         }
-        console.log(`二维码已过期，正在刷新...(${refreshCount}/${MAX_QR_REFRESH_COUNT})\n`);
+        console.log(`QR code expired. Refreshing... (${refreshCount}/${MAX_QR_REFRESH_COUNT})\n`);
         printQrCode(qrResponse.qrcode_img_content);
         break;
       case "confirmed":
         if (!statusResponse.bot_token || !statusResponse.ilink_bot_id) {
-          throw new Error("登录成功但缺少 bot token 或账号 ID");
+          throw new Error("Login succeeded but the response is missing the bot token or account ID.");
         }
         return {
           accountId: statusResponse.ilink_bot_id,
@@ -141,11 +141,11 @@ async function waitForWeixinLogin({ apiBaseUrl, botType, timeoutMs }) {
         break;
     }
   }
-  throw new Error("登录超时，请重新执行 login");
+  throw new Error("Login timed out. Run login again.");
 }
 
 async function runLoginFlow(config) {
-  console.log("[cyberboss] 正在启动微信扫码登录...");
+  console.log("[cyberboss] starting WeChat QR login...");
   const result = await waitForWeixinLogin({
     apiBaseUrl: config.weixinBaseUrl,
     botType: config.weixinQrBotType,
@@ -153,7 +153,7 @@ async function runLoginFlow(config) {
   });
   const account = saveWeixinAccount(config, result.accountId, result);
   cleanupStaleAccountsForUserId(config, account);
-  console.log("\n✅ 与微信连接成功！");
+  console.log("\n✅ Connected to WeChat successfully.");
   console.log(`accountId: ${account.accountId}`);
   console.log(`userId: ${account.userId || "(unknown)"}`);
   console.log(`baseUrl: ${account.baseUrl}`);

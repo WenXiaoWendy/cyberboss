@@ -19,7 +19,7 @@ function createTimelineIntegration(config) {
     async runSubcommand(subcommand, args = []) {
       const normalizedSubcommand = normalizeText(subcommand);
       if (!normalizedSubcommand) {
-        throw new Error("timeline 子命令不能为空");
+        throw new Error("timeline subcommand cannot be empty");
       }
       return runTimelineCommand(binPath, [normalizedSubcommand, ...normalizeArgs(args)], {
         TIMELINE_FOR_AGENT_STATE_DIR: config.stateDir,
@@ -66,11 +66,11 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (signal) {
-        reject(new Error(`timeline 进程被信号中断: ${signal}`));
+        reject(new Error(`timeline process was interrupted by signal: ${signal}`));
         return;
       }
       if (code !== 0) {
-        reject(new Error(`timeline 命令执行失败，退出码 ${code}`));
+        reject(new Error(`timeline command failed with exit code ${code}`));
         return;
       }
       if (options.subcommand === "write") {
@@ -147,7 +147,7 @@ function detectTimelineWriteFailure(stdout, stderr) {
   const status = normalizeText(statusMatch?.[1]);
   const events = Number.parseInt(eventsMatch?.[1] || "", 10);
   if (status === "missing" && Number.isFinite(events) && events <= 0) {
-    return "timeline write 没有写入任何事件；当前结果是 events: 0 且 status: missing。请检查是否真的传入了有效 JSON events。";
+    return "timeline write did not persist any events. The result was events: 0 and status: missing. Check whether you passed valid JSON events.";
   }
   return "";
 }

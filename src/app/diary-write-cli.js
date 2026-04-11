@@ -6,7 +6,7 @@ async function runDiaryWriteCommand(config) {
   const options = parseArgs(args);
   const body = await resolveBody(options);
   if (!body) {
-    throw new Error("日记内容不能为空，传 --text 或通过 stdin 输入");
+    throw new Error("Diary content cannot be empty. Pass --text or provide input through stdin.");
   }
 
   const now = new Date();
@@ -59,7 +59,7 @@ function parseArgs(args) {
       options.useStdin = true;
       continue;
     }
-    throw new Error(`未知参数: ${arg}`);
+    throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
 }
@@ -106,7 +106,7 @@ function formatDate(date) {
 }
 
 function formatTime(date) {
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Shanghai",
     hour: "2-digit",
     minute: "2-digit",

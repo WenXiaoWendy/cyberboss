@@ -19,12 +19,12 @@ async function runReminderWriteCommand(config) {
   const options = parseArgs(args);
   const body = await resolveBody(options);
   if (!body) {
-    throw new Error("提醒内容不能为空，传 --text 或通过 stdin 输入");
+    throw new Error("Reminder text cannot be empty. Pass --text or provide input through stdin.");
   }
 
   const dueAtMs = resolveDueAtMs(options);
   if (!Number.isFinite(dueAtMs) || dueAtMs <= Date.now()) {
-    throw new Error("缺少有效时间，使用 --delay 30s|10m|1h30m|2d4h20m 或 --at 2026-04-07T21:30+08:00");
+    throw new Error("Missing a valid time. Use --delay 30s|10m|1h30m|2d4h20m or --at 2026-04-07T21:30+08:00.");
   }
 
   const account = resolveSelectedAccount(config);
@@ -36,13 +36,13 @@ async function runReminderWriteCommand(config) {
     sessionStore,
   });
   if (!senderId) {
-    throw new Error("无法确定 reminder 的微信用户，传 --user 或先让唯一活跃用户和 bot 聊过一次");
+    throw new Error("Cannot determine the WeChat user for this reminder. Pass --user or let the only active user talk to the bot once first.");
   }
 
   const contextTokens = loadPersistedContextTokens(config, account.accountId);
   const contextToken = String(contextTokens[senderId] || "").trim();
   if (!contextToken) {
-    throw new Error(`找不到 ${senderId} 的 context_token，先让这个用户和 bot 聊过一次`);
+    throw new Error(`Cannot find context_token for ${senderId}. Let this user talk to the bot once first.`);
   }
 
   const queue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
@@ -92,7 +92,7 @@ function parseArgs(args) {
       options.useStdin = true;
       continue;
     }
-    throw new Error(`未知参数: ${arg}`);
+    throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
 }
@@ -101,7 +101,7 @@ function resolveDueAtMs(options) {
   const delayMs = parseDelay(options.delay);
   const scheduledAtMs = parseAbsoluteTime(options.at);
   if (delayMs && scheduledAtMs) {
-    throw new Error("--delay 和 --at 不能同时传");
+    throw new Error("--delay and --at cannot be used together");
   }
   if (delayMs) {
     return Date.now() + delayMs;

@@ -90,7 +90,7 @@ function bodyFromItemList(items) {
       if (!parts.length) {
         return text;
       }
-      return `[引用: ${parts.join(" | ")}]\n${text}`;
+      return `[Quoted: ${parts.join(" | ")}]\n${text}`;
     }
     if (itemType === MESSAGE_ITEM_VOICE) {
       const voiceText = normalizeText(item?.voice_item?.text);

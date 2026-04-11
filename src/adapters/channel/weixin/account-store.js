@@ -95,23 +95,23 @@ function resolveSelectedAccount(config) {
   if (config.accountId) {
     const account = loadWeixinAccount(config, config.accountId);
     if (!account) {
-      throw new Error(`未找到微信账号: ${config.accountId}`);
+      throw new Error(`WeChat account not found: ${config.accountId}`);
     }
     if (!account.token) {
-      throw new Error(`微信账号缺少 token: ${account.accountId}，请重新执行 login`);
+      throw new Error(`WeChat account is missing a token: ${account.accountId}. Run login again.`);
     }
     return account;
   }
   const accounts = listWeixinAccounts(config);
   if (!accounts.length) {
-    throw new Error("当前没有已保存的微信账号，请先执行 `npm run login`");
+    throw new Error("No saved WeChat account was found. Run `npm run login` first.");
   }
   if (accounts.length > 1) {
     const accountIds = accounts.map((account) => account.accountId).join(", ");
-    throw new Error(`检测到多个微信账号，请设置 CYBERBOSS_ACCOUNT_ID。可选值: ${accountIds}`);
+    throw new Error(`Multiple WeChat accounts were detected. Set CYBERBOSS_ACCOUNT_ID. Available values: ${accountIds}`);
   }
   if (!accounts[0].token) {
-    throw new Error(`微信账号缺少 token: ${accounts[0].accountId}，请重新执行 login`);
+    throw new Error(`WeChat account is missing a token: ${accounts[0].accountId}. Run login again.`);
   }
   return accounts[0];
 }

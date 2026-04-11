@@ -42,7 +42,7 @@ function extractAssistantText(params) {
 
 function extractFailureText(params) {
   const rawMessage = normalizeIdentifier(params?.turn?.error?.message || params?.error?.message);
-  return rawMessage ? `执行失败：${rawMessage}` : "执行失败";
+  return rawMessage ? `Execution failed: ${rawMessage}` : "Execution failed";
 }
 
 function normalizeIdentifier(value) {

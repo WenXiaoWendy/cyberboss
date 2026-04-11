@@ -75,10 +75,10 @@ function createLegacyWeixinChannelAdapter(config) {
     printAccounts() {
       const accounts = listWeixinAccounts(config);
       if (!accounts.length) {
-        console.log("当前没有已保存的微信账号。先执行 `npm run login`。");
+        console.log("No saved WeChat account found. Run `npm run login` first.");
         return;
       }
-      console.log("已保存账号：");
+      console.log("Saved accounts:");
       for (const account of accounts) {
         console.log(`- ${account.accountId}`);
         console.log(`  userId: ${account.userId || "(unknown)"}`);
@@ -130,20 +130,20 @@ function createLegacyWeixinChannelAdapter(config) {
       const account = ensureAccount();
       const resolvedToken = resolveContextToken(userId, contextToken);
       if (!resolvedToken) {
-        throw new Error(`缺少 context_token，无法回复用户 ${userId}`);
+        throw new Error(`Missing context_token. Cannot reply to user ${userId}.`);
       }
       const content = String(text || "");
       const sendChunks = preserveBlock
-        ? splitUtf8(compactPlainTextForWeixin(content) || "已完成。", MAX_WEIXIN_CHUNK)
+        ? splitUtf8(compactPlainTextForWeixin(content) || "Completed.", MAX_WEIXIN_CHUNK)
         : packChunksForWeixinDelivery(
           chunkReplyTextForWeixin(content, WEIXIN_SEND_CHUNK_LIMIT).length
             ? chunkReplyTextForWeixin(content, WEIXIN_SEND_CHUNK_LIMIT)
-            : ["已完成。"],
+            : ["Completed."],
           WEIXIN_MAX_DELIVERY_MESSAGES,
           MAX_WEIXIN_CHUNK
         );
       for (let index = 0; index < sendChunks.length; index += 1) {
-        const compactChunk = compactPlainTextForWeixin(sendChunks[index]) || "已完成。";
+        const compactChunk = compactPlainTextForWeixin(sendChunks[index]) || "Completed.";
         await sendMessage({
           baseUrl: account.baseUrl,
           token: account.token,
@@ -201,7 +201,7 @@ function createLegacyWeixinChannelAdapter(config) {
       const account = ensureAccount();
       const resolvedToken = resolveContextToken(userId, contextToken);
       if (!resolvedToken) {
-        throw new Error(`缺少 context_token，无法发送文件给用户 ${userId}`);
+        throw new Error(`Missing context_token. Cannot send a file to user ${userId}.`);
       }
       return sendWeixinMediaFile({
         filePath,
@@ -320,7 +320,7 @@ function packChunksForWeixinDelivery(chunks, maxMessages = 10, maxChunkChars = 3
     return packed;
   }
 
-  const tailText = compactPlainTextForWeixin(tailChunks.join("\n")) || "已完成。";
+  const tailText = compactPlainTextForWeixin(tailChunks.join("\n")) || "Completed.";
   if (tailText.length <= maxChunkChars) {
     packed.push(tailText);
     return packed;
@@ -350,7 +350,7 @@ function packChunksForWeixinDelivery(chunks, maxMessages = 10, maxChunkChars = 3
     groupedTail.push(current);
   }
 
-  return preserved.concat(groupedTail.map((item) => compactPlainTextForWeixin(item) || "已完成。")).slice(0, maxMessages);
+  return preserved.concat(groupedTail.map((item) => compactPlainTextForWeixin(item) || "Completed.")).slice(0, maxMessages);
 }
 
 function collectStreamingBoundaries(text) {

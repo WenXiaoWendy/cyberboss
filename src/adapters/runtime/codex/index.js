@@ -277,7 +277,7 @@ function waitForTurnCompletion(client, threadId) {
           .trim();
         resolve({
           turnId: completedTurnId || activeTurnId,
-          text: text || "已完成。",
+          text: text || "Completed.",
         });
       }
     });

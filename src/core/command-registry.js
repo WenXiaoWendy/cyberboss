@@ -1,60 +1,60 @@
 const COMMAND_GROUPS = [
   {
     id: "lifecycle",
-    label: "启动与诊断",
+    label: "Lifecycle & Diagnostics",
     actions: [
       {
         action: "app.login",
-        summary: "发起微信扫码登录并保存账号",
+        summary: "Start WeChat QR login and save the account",
         terminal: ["login"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.accounts",
-        summary: "查看本地已保存账号",
+        summary: "List locally saved accounts",
         terminal: ["accounts"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.start",
-        summary: "启动当前 channel/runtime 主循环",
+        summary: "Start the current channel/runtime main loop",
         terminal: ["start"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.shared_start",
-        summary: "启动共享 app-server 与共享微信桥接",
+        summary: "Start the shared app-server and shared WeChat bridge",
         terminal: ["shared start"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.shared_open",
-        summary: "接入当前微信绑定的共享线程",
+        summary: "Attach to the shared thread currently bound in WeChat",
         terminal: ["shared open"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.shared_status",
-        summary: "查看共享 app-server 与共享桥接状态",
+        summary: "Show the shared app-server and bridge status",
         terminal: ["shared status"],
         weixin: [],
         status: "active",
       },
       {
         action: "app.doctor",
-        summary: "打印当前配置、边界和线程状态",
+        summary: "Print current config, boundaries, and thread state",
         terminal: ["doctor"],
         weixin: [],
         status: "active",
       },
       {
         action: "system.send",
-        summary: "向内部系统队列写入一条不可见触发消息",
+        summary: "Write an invisible trigger message into the internal system queue",
         terminal: ["system send"],
         terminalGroup: "system",
         weixin: [],
@@ -62,7 +62,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "system.checkin_poller",
-        summary: "按随机间隔写入主动 check-in 触发",
+        summary: "Emit proactive check-in triggers at random intervals",
         terminal: ["system checkin-poller"],
         terminalGroup: "system",
         weixin: [],
@@ -72,46 +72,46 @@ const COMMAND_GROUPS = [
   },
   {
     id: "workspace",
-    label: "项目与线程",
+    label: "Workspace & Thread",
     actions: [
       {
         action: "workspace.bind",
-        summary: "绑定当前聊天使用的项目目录",
+        summary: "Bind the current chat to a workspace directory",
         terminal: [],
         weixin: ["/bind"],
         status: "active",
       },
       {
         action: "workspace.status",
-        summary: "查看当前项目、线程、模型与上下文使用情况",
+        summary: "Show the current workspace, thread, model, and context usage",
         terminal: [],
         weixin: ["/status"],
         status: "active",
       },
       {
         action: "thread.new",
-        summary: "切到新线程草稿",
+        summary: "Switch to a fresh thread draft",
         terminal: [],
         weixin: ["/new"],
         status: "active",
       },
       {
         action: "thread.reread",
-        summary: "让当前线程重新读取最新 instructions",
+        summary: "Make the current thread reread the latest instructions",
         terminal: [],
         weixin: ["/reread"],
         status: "active",
       },
       {
         action: "thread.switch",
-        summary: "切换到指定线程",
+        summary: "Switch to a specific thread",
         terminal: [],
         weixin: ["/switch <threadId>"],
         status: "active",
       },
       {
         action: "thread.stop",
-        summary: "停止当前线程中的运行",
+        summary: "Stop the current run inside the thread",
         terminal: [],
         weixin: ["/stop"],
         status: "active",
@@ -120,25 +120,25 @@ const COMMAND_GROUPS = [
   },
   {
     id: "approval",
-    label: "授权与控制",
+    label: "Approvals & Control",
     actions: [
       {
         action: "approval.accept_once",
-        summary: "允许当前待处理的授权请求一次",
+        summary: "Allow the current approval request once",
         terminal: [],
         weixin: ["/yes"],
         status: "active",
       },
       {
         action: "approval.accept_workspace",
-        summary: "在当前项目内持续允许同前缀命令",
+        summary: "Keep allowing matching command prefixes in the current workspace",
         terminal: [],
         weixin: ["/always"],
         status: "active",
       },
       {
         action: "approval.reject_once",
-        summary: "拒绝当前待处理的授权请求",
+        summary: "Deny the current approval request",
         terminal: [],
         weixin: ["/no"],
         status: "active",
@@ -147,25 +147,25 @@ const COMMAND_GROUPS = [
   },
   {
     id: "capabilities",
-    label: "能力集成",
+    label: "Capabilities",
     actions: [
       {
         action: "model.inspect",
-        summary: "查看当前模型",
+        summary: "Inspect the current model",
         terminal: [],
         weixin: ["/model"],
         status: "active",
       },
       {
         action: "model.select",
-        summary: "切换到指定模型",
+        summary: "Switch to a specific model",
         terminal: [],
         weixin: ["/model <id>"],
         status: "active",
       },
       {
         action: "channel.send_file",
-        summary: "将文件作为附件发送回当前聊天",
+        summary: "Send a local file back to the current chat as an attachment",
         terminal: ["channel send-file"],
         terminalGroup: "channel",
         weixin: [],
@@ -173,7 +173,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "timeline.write",
-        summary: "将当前上下文写入时间轴",
+        summary: "Write the current context into timeline",
         terminal: ["timeline write"],
         terminalGroup: "timeline",
         weixin: [],
@@ -181,7 +181,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "timeline.build",
-        summary: "构建时间轴静态页面",
+        summary: "Build the static timeline site",
         terminal: ["timeline build"],
         terminalGroup: "timeline",
         weixin: [],
@@ -189,7 +189,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "timeline.serve",
-        summary: "启动时间轴静态页面服务",
+        summary: "Start the static timeline site server",
         terminal: ["timeline serve"],
         terminalGroup: "timeline",
         weixin: [],
@@ -197,7 +197,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "timeline.dev",
-        summary: "启动时间轴热更新开发服务",
+        summary: "Start the hot-reload timeline dev server",
         terminal: ["timeline dev"],
         terminalGroup: "timeline",
         weixin: [],
@@ -205,7 +205,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "timeline.screenshot",
-        summary: "截图时间轴页面",
+        summary: "Capture a timeline screenshot",
         terminal: ["timeline screenshot"],
         terminalGroup: "timeline",
         weixin: [],
@@ -213,7 +213,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "reminder.create",
-        summary: "创建提醒并交给调度层处理",
+        summary: "Create a reminder and hand it to the scheduler",
         terminal: ["reminder write"],
         terminalGroup: "reminder",
         weixin: [],
@@ -221,7 +221,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "diary.append",
-        summary: "追加一条日记记录",
+        summary: "Append a diary entry",
         terminal: ["diary write"],
         terminalGroup: "diary",
         weixin: [],
@@ -229,7 +229,7 @@ const COMMAND_GROUPS = [
       },
       {
         action: "app.help",
-        summary: "查看当前通道可用命令",
+        summary: "Show currently available commands for this channel",
         terminal: ["help"],
         weixin: ["/help"],
         status: "active",
@@ -247,11 +247,11 @@ function listCommandGroups() {
 
 function buildTerminalHelpText() {
   const lines = [
-    "用法: npm run <script>",
+    "Usage: npm run <script>",
     "",
-    "当前终端命令：",
-    "  npm run shared:start   默认启动共享 app-server 与共享微信桥接",
-    "  npm run shared:open    默认接入当前微信绑定的共享线程",
+    "Current terminal commands:",
+    "  npm run shared:start   default entrypoint for the shared app-server and WeChat bridge",
+    "  npm run shared:open    default entrypoint for the shared thread currently bound in WeChat",
   ];
 
   for (const group of COMMAND_GROUPS) {
@@ -268,7 +268,7 @@ function buildTerminalHelpText() {
   const plannedGroups = collectPlannedTerminalGroups();
   if (plannedGroups.length) {
     lines.push("");
-    lines.push("规划中的终端子命令：");
+    lines.push("Planned terminal subcommands:");
     for (const group of plannedGroups) {
       lines.push(`- ${group.name}`);
       for (const action of group.actions) {
@@ -278,19 +278,19 @@ function buildTerminalHelpText() {
   }
 
   lines.push("");
-  lines.push("微信命令映射与后续能力动作请看 README / docs。");
+  lines.push("See the README and docs for WeChat command mappings and capability actions.");
   return lines.join("\n");
 }
 
 function buildWeixinHelpText() {
-  const lines = ["当前可用命令："];
+  const lines = ["Available commands:"];
   for (const group of COMMAND_GROUPS) {
     const activeActions = group.actions.filter((action) => action.status === "active" && action.weixin.length);
     if (!activeActions.length) {
       continue;
     }
     lines.push("");
-    lines.push(`${group.label}：`);
+    lines.push(`${group.label}:`);
     for (const action of activeActions) {
       lines.push(`- ${action.weixin.join(", ")}  ${action.summary}`);
     }
@@ -310,11 +310,11 @@ function buildTerminalTopicHelp(topic) {
 
   const hasPlannedOnly = actions.every((action) => action.status === "planned");
   const lines = [
-    `用法: ${buildTopicUsage(normalizedTopic)}`,
+    `Usage: ${buildTopicUsage(normalizedTopic)}`,
     "",
     hasPlannedOnly
-      ? `当前 ${normalizedTopic} 命令仍在接入中，计划中的子命令：`
-      : `当前 ${normalizedTopic} 命令：`,
+      ? `The ${normalizedTopic} command group is still being wired in. Planned subcommands:`
+      : `Current ${normalizedTopic} commands:`,
   ];
   for (const action of actions) {
     lines.push(`- ${formatTerminalExamples(action)}  ${action.summary}`);
@@ -370,32 +370,37 @@ function buildTopicUsage(topic) {
       return [
         "npm run reminder:write -- <args>",
         "",
-        "参数：",
+        "Arguments:",
         "  --delay 30s|10m|1h30m|2d4h",
         "  --at 2026-04-07T21:30+08:00 | 2026-04-07 21:30",
-        "  --text \"提醒内容\"",
-        "  --user <wechatUserId>  可选",
+        "  --text \"Reminder text\"",
+        "  --stdin                    prefer this for long text or text containing quotes",
+        "  --user <wechatUserId>      optional",
+        "",
+        "Examples:",
+        "  npm run reminder:write -- --delay 30m --text \"Reminder text\"",
+        "  printf '%s\\n' 'Ask again in 20 minutes if she still has not come back.' | npm run reminder:write -- --delay 20m --stdin",
       ].join("\n");
     case "diary":
       return [
         "npm run diary:write -- <args>",
         "",
-        "参数：",
-        "  --text \"内容\"",
-        "  --title \"标题\"        只影响条目标题，不决定落到哪一天",
-        "  --date YYYY-MM-DD     决定写入哪个日记文件",
-        "  --time HH:mm          可选，覆盖条目时间",
+        "Arguments:",
+        "  --text \"Content\"",
+        "  --title \"Title\"      only affects the entry title, not the target date file",
+        "  --date YYYY-MM-DD     decides which diary file to write into",
+        "  --time HH:mm          optional, overrides the entry time",
         "",
-        "示例：",
-        "  npm run diary:write -- --date 2026-04-06 --title \"4.6\" --text \"内容\"",
+        "Example:",
+        "  npm run diary:write -- --date 2026-04-06 --title \"4.6\" --text \"Content\"",
       ].join("\n");
     case "channel":
       return [
-        "npm run channel:send-file -- --path /绝对路径 [--user <wechatUserId>]",
+        "npm run channel:send-file -- --path /absolute/path [--user <wechatUserId>]",
         "",
-        "参数：",
-        "  --path /绝对路径         要发回当前微信聊天的本地文件",
-        "  --user <wechatUserId>   可选，覆盖默认接收用户",
+        "Arguments:",
+        "  --path /absolute/path     local file to send back to the current WeChat chat",
+        "  --user <wechatUserId>    optional, overrides the default receiver",
       ].join("\n");
     case "system":
       return "npm run system:send -- <args> / npm run system:checkin";
@@ -403,8 +408,8 @@ function buildTopicUsage(topic) {
       return [
         "npm run timeline:write -- <args> / npm run timeline:build / npm run timeline:serve / npm run timeline:dev / npm run timeline:screenshot -- --send",
         "",
-        "补充：",
-        "  timeline 截图稳定入口是 npm run timeline:screenshot -- --send，它会把任务交给当前微信桥执行",
+        "Notes:",
+        "  The stable timeline screenshot entrypoint is `npm run timeline:screenshot -- --send`. It hands the job to the current WeChat bridge.",
       ].join("\n");
     default:
       return "npm run <script>";
@@ -430,7 +435,7 @@ function toNpmRunExample(commandText) {
     case "diary write":
       return "npm run diary:write -- <args>";
     case "channel send-file":
-      return "npm run channel:send-file -- --path /绝对路径";
+      return "npm run channel:send-file -- --path /absolute/path";
     case "system send":
       return "npm run system:send -- <args>";
     case "system checkin-poller":
