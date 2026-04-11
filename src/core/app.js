@@ -5,7 +5,7 @@ const fs = require("fs");
 const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
-const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
+const { findModelByQuery, resolveEffectiveModelForEffort } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { buildWeixinHelpText } = require("./command-registry");
 const { resolvePreferredSenderId } = require("./default-targets");
@@ -281,11 +281,13 @@ class CyberbossApp {
     }).catch(() => {});
 
     try {
+      const codexParams = this.runtimeAdapter.getSessionStore().getCodexParamsForWorkspace(bindingKey, workspaceRoot);
       const turn = await this.runtimeAdapter.sendTextTurn({
         bindingKey,
         workspaceRoot,
         text: prepared.text,
-        model: this.runtimeAdapter.getSessionStore().getCodexParamsForWorkspace(bindingKey, workspaceRoot).model,
+        model: codexParams.model,
+        effort: codexParams.effort,
         metadata: {
           workspaceId: prepared.workspaceId,
           accountId: prepared.accountId,
@@ -651,11 +653,13 @@ class CyberbossApp {
     const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
     const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
     const usage = this.threadStateStore.getLatestUsage();
+    const codexParams = this.runtimeAdapter.getSessionStore().getCodexParamsForWorkspace(bindingKey, workspaceRoot);
     const lines = [
       `workspace: ${workspaceRoot}`,
       `thread: ${threadId || "(none)"}`,
       `status: ${threadState?.status || "idle"}`,
-      `model: ${this.runtimeAdapter.getSessionStore().getCodexParamsForWorkspace(bindingKey, workspaceRoot).model || "(default)"}`,
+      `model: ${codexParams.model || "(default)"}`,
+      `effort: ${codexParams.effort || "(default)"}`,
     ];
     if (usage) {
       const usageParts = [];
@@ -715,6 +719,7 @@ class CyberbossApp {
     }
 
     try {
+      const codexParams = sessionStore.getCodexParamsForWorkspace(bindingKey, workspaceRoot);
       this.streamDelivery.queueReplyTargetForThread(threadId, {
         userId: normalized.senderId,
         contextToken: normalized.contextToken,
@@ -729,7 +734,8 @@ class CyberbossApp {
       await this.runtimeAdapter.refreshThreadInstructions({
         threadId,
         workspaceRoot,
-        model: sessionStore.getCodexParamsForWorkspace(bindingKey, workspaceRoot).model,
+        model: codexParams.model,
+        effort: codexParams.effort,
       });
     } catch (error) {
       await this.channelAdapter.sendText({
@@ -850,14 +856,22 @@ class CyberbossApp {
     const query = normalizeCommandArgument(command.args);
     const sessionStore = this.runtimeAdapter.getSessionStore();
     const catalog = sessionStore.getAvailableModelCatalog();
-    const currentModel = sessionStore.getCodexParamsForWorkspace(bindingKey, workspaceRoot).model;
+    const currentParams = sessionStore.getCodexParamsForWorkspace(bindingKey, workspaceRoot);
+    const currentModel = currentParams.model;
+    const currentEffort = currentParams.effort;
 
     if (!query) {
       const lines = [
         `当前模型: ${currentModel || "(default)"}`,
+        `当前 effort: ${currentEffort || "(default)"}`,
       ];
       if (catalog?.models?.length) {
         lines.push(`可用模型: ${catalog.models.map((item) => item.model).join("、")}`);
+        const effectiveModel = resolveEffectiveModelForEffort(catalog.models, currentModel);
+        const supportedEfforts = listSupportedEffortsForModel(effectiveModel);
+        if (supportedEfforts.length) {
+          lines.push(`可用 effort: ${supportedEfforts.join("、")}`);
+        }
       } else {
         lines.push("可用模型: (未获取到模型列表)");
       }
@@ -869,22 +883,34 @@ class CyberbossApp {
       return;
     }
 
-    const matched = findModelByQuery(catalog?.models || [], query);
-    if (!matched) {
+    const selection = resolveModelSelection({
+      query,
+      catalog: catalog?.models || [],
+      currentModel,
+      currentEffort,
+    });
+    if (selection.error) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `未找到模型：${query}`,
+        text: selection.error,
         contextToken: normalized.contextToken,
       });
       return;
     }
 
     sessionStore.setCodexParamsForWorkspace(bindingKey, workspaceRoot, {
-      model: matched.model,
+      model: selection.model,
+      effort: selection.effort,
     });
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `已切换模型。\n\nworkspace: ${workspaceRoot}\nmodel: ${matched.model}`,
+      text: [
+        "已更新运行参数。",
+        "",
+        `workspace: ${workspaceRoot}`,
+        `model: ${selection.model || "(default)"}`,
+        `effort: ${selection.effort || "(default)"}`,
+      ].join("\n"),
       contextToken: normalized.contextToken,
     });
   }
@@ -1231,6 +1257,131 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function resolveModelSelection({ query = "", catalog = [], currentModel = "", currentEffort = "" } = {}) {
+  const normalizedQuery = normalizeCommandArgument(query);
+  if (!normalizedQuery) {
+    return {
+      model: currentModel,
+      effort: normalizeReasoningEffort(currentEffort),
+    };
+  }
+
+  const tokens = normalizedQuery.split(/\s+/).map((part) => normalizeCommandArgument(part)).filter(Boolean);
+  const effortOnlyPrefix = normalizeCommandArgument(tokens[0]).toLowerCase();
+  if (effortOnlyPrefix === "effort" || effortOnlyPrefix === "reasoning") {
+    if (isDefaultReasoningEffortToken(tokens[1])) {
+      return {
+        model: currentModel,
+        effort: "",
+      };
+    }
+    const requestedEffort = normalizeReasoningEffort(tokens[1]);
+    if (!requestedEffort) {
+      return {
+        error: "用法：/model effort <default|none|minimal|low|medium|high|xhigh>",
+      };
+    }
+    const effectiveModel = resolveEffectiveModelForEffort(catalog, currentModel);
+    const validationError = validateReasoningEffortForModel(requestedEffort, effectiveModel);
+    if (validationError) {
+      return { error: validationError };
+    }
+    return {
+      model: currentModel,
+      effort: requestedEffort,
+    };
+  }
+
+  const rawCandidateEffort = normalizeCommandArgument(tokens[tokens.length - 1]);
+  const candidateEffort = normalizeReasoningEffort(rawCandidateEffort);
+  const hasExplicitEffort = tokens.length > 1 && (Boolean(candidateEffort) || isDefaultReasoningEffortToken(rawCandidateEffort));
+  const modelQuery = hasExplicitEffort
+    ? tokens.slice(0, -1).join(" ")
+    : normalizedQuery;
+  const matched = findModelByQuery(catalog, modelQuery);
+  if (!matched) {
+    return {
+      error: `未找到模型：${modelQuery}`,
+    };
+  }
+
+  const requestedEffort = hasExplicitEffort
+    ? (isDefaultReasoningEffortToken(rawCandidateEffort) ? "" : candidateEffort)
+    : resolveNextReasoningEffort(matched, currentEffort);
+  const validationError = validateReasoningEffortForModel(requestedEffort, matched);
+  if (validationError) {
+    return { error: validationError };
+  }
+
+  return {
+    model: matched.model,
+    effort: requestedEffort,
+  };
+}
+
+function resolveNextReasoningEffort(model, currentEffort) {
+  const normalizedCurrent = normalizeReasoningEffort(currentEffort);
+  if (normalizedCurrent && isReasoningEffortSupported(model, normalizedCurrent)) {
+    return normalizedCurrent;
+  }
+
+  const normalizedDefault = normalizeReasoningEffort(model?.defaultReasoningEffort);
+  if (normalizedDefault && isReasoningEffortSupported(model, normalizedDefault)) {
+    return normalizedDefault;
+  }
+
+  if (normalizedCurrent && !listSupportedEffortsForModel(model).length) {
+    return normalizedCurrent;
+  }
+
+  return "";
+}
+
+function validateReasoningEffortForModel(effort, model) {
+  const normalizedEffort = normalizeReasoningEffort(effort);
+  if (!normalizedEffort) {
+    return "";
+  }
+  if (isReasoningEffortSupported(model, normalizedEffort)) {
+    return "";
+  }
+  const modelLabel = normalizeText(model?.model) || "(default)";
+  const supported = listSupportedEffortsForModel(model);
+  if (supported.length) {
+    return `模型 ${modelLabel} 不支持 effort=${normalizedEffort}，可用值：${supported.join("、")}`;
+  }
+  return `模型 ${modelLabel} 不支持 effort=${normalizedEffort}`;
+}
+
+function listSupportedEffortsForModel(model) {
+  const supported = Array.isArray(model?.supportedReasoningEfforts)
+    ? model.supportedReasoningEfforts
+    : [];
+  const normalized = supported
+    .map((value) => normalizeReasoningEffort(value))
+    .filter(Boolean);
+  return normalized;
+}
+
+function isReasoningEffortSupported(model, effort) {
+  const normalizedEffort = normalizeReasoningEffort(effort);
+  if (!normalizedEffort) {
+    return true;
+  }
+  const supported = listSupportedEffortsForModel(model);
+  return !supported.length || supported.includes(normalizedEffort);
+}
+
+function normalizeReasoningEffort(value) {
+  const normalized = normalizeCommandArgument(value).toLowerCase();
+  return SUPPORTED_REASONING_EFFORTS.has(normalized) ? normalized : "";
+}
+
+function isDefaultReasoningEffortToken(value) {
+  const normalized = normalizeCommandArgument(value).toLowerCase();
+  return normalized === "default" || normalized === "auto";
+}
+
 function matchesCommandPrefix(commandTokens, allowlist) {
   const normalizedCommandTokens = Array.isArray(commandTokens)
     ? commandTokens.map((part) => normalizeCommandArgument(part)).filter(Boolean)
@@ -1505,3 +1656,5 @@ function resolveTimelineScreenshotOutput(args) {
   }
   return "";
 }
+
+const SUPPORTED_REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);

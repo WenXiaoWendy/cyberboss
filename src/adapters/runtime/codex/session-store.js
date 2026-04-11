@@ -95,26 +95,29 @@ class SessionStore {
   getCodexParamsForWorkspace(bindingKey, workspaceRoot) {
     const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
-      return { model: "" };
+      return { model: "", effort: "" };
     }
     const current = this.getBinding(bindingKey) || {};
     const codexParamsByWorkspaceRoot = getCodexParamsMap(current);
     const entry = codexParamsByWorkspaceRoot[normalizedWorkspaceRoot];
     return {
       model: normalizeValue(entry?.model),
+      effort: normalizeValue(entry?.effort),
     };
   }
 
-  setCodexParamsForWorkspace(bindingKey, workspaceRoot, { model = "" }) {
+  setCodexParamsForWorkspace(bindingKey, workspaceRoot, { model, effort } = {}) {
     const normalizedWorkspaceRoot = normalizeValue(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return this.getBinding(bindingKey);
     }
     const current = this.getBinding(bindingKey) || {};
+    const currentEntry = getCodexParamsMap(current)[normalizedWorkspaceRoot] || {};
     const codexParamsByWorkspaceRoot = {
       ...getCodexParamsMap(current),
       [normalizedWorkspaceRoot]: {
-        model: normalizeValue(model),
+        model: model === undefined ? normalizeValue(currentEntry.model) : normalizeValue(model),
+        effort: effort === undefined ? normalizeValue(currentEntry.effort) : normalizeValue(effort),
       },
     };
     return this.updateBinding(bindingKey, {

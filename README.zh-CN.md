@@ -198,9 +198,11 @@ CYBERBOSS_WEIXIN_ADAPTER=v2
 - `/no`
   拒绝当前待处理授权
 - `/model`
-  查看当前模型
-- `/model <id>`
-  切换模型
+  查看当前模型与 reasoning effort
+- `/model <id> [effort]`
+  切换模型，并可同时指定 effort
+- `/model effort <level>`
+  只调整当前/默认模型的 effort
 - `/help`
   查看微信内命令帮助
 

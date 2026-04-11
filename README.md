@@ -192,9 +192,11 @@ Here, `checkin` means the random wake-up mechanism, not a fixed periodic reminde
 - `/no`
   Reject the current approval
 - `/model`
-  Show current model
-- `/model <id>`
-  Switch model
+  Show current model and reasoning effort
+- `/model <id> [effort]`
+  Switch model, optionally with reasoning effort
+- `/model effort <level>`
+  Change only the reasoning effort for the current/default model
 - `/help`
   Show WeChat command help
 

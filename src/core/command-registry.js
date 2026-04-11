@@ -151,16 +151,16 @@ const COMMAND_GROUPS = [
     actions: [
       {
         action: "model.inspect",
-        summary: "查看当前模型",
+        summary: "查看当前模型与 effort",
         terminal: [],
         weixin: ["/model"],
         status: "active",
       },
       {
         action: "model.select",
-        summary: "切换到指定模型",
+        summary: "切换模型，可选设置 effort",
         terminal: [],
-        weixin: ["/model <id>"],
+        weixin: ["/model <id> [effort]", "/model effort <level>"],
         status: "active",
       },
       {

@@ -107,7 +107,7 @@ function createCodexRuntimeAdapter(config) {
       await this.initialize();
       return runtimeClient.resumeThread({ threadId });
     },
-    async refreshThreadInstructions({ threadId, workspaceRoot, model = "" }) {
+    async refreshThreadInstructions({ threadId, workspaceRoot, model = "", effort = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
       const refreshText = buildInstructionRefreshText(config);
@@ -117,12 +117,13 @@ function createCodexRuntimeAdapter(config) {
         threadId,
         text: refreshText,
         model,
+        effort,
         workspaceRoot,
       });
       const result = await completion;
       return { threadId, ...result };
     },
-    async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "" }) {
+    async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "", effort = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
 
@@ -153,6 +154,7 @@ function createCodexRuntimeAdapter(config) {
         threadId,
         text: outboundText,
         model,
+        effort,
         workspaceRoot,
       });
       return { threadId };
