@@ -140,9 +140,9 @@ function createLegacyWeixinChannelAdapter(config) {
             : ["Completed."],
           WEIXIN_MAX_DELIVERY_MESSAGES,
           MAX_WEIXIN_CHUNK
-        );
+      );
       for (let index = 0; index < sendChunks.length; index += 1) {
-        const compactChunk = stripTrailingChineseFullStop(compactPlainTextForWeixin(sendChunks[index])) || "Completed.";
+        const compactChunk = stripSentenceTailChineseFullStops(compactPlainTextForWeixin(sendChunks[index])) || "Completed.";
         await sendMessage({
           baseUrl: account.baseUrl,
           token: account.token,
@@ -231,8 +231,11 @@ function compactPlainTextForWeixin(text) {
   return trimOuterBlankLines(normalized.replace(/\n\s*\n+/g, "\n"));
 }
 
-function stripTrailingChineseFullStop(text) {
-  return String(text || "").replace(/。+$/u, "").trimEnd();
+function stripSentenceTailChineseFullStops(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.replace(/。+(?=(?:\s*["'”’）)\]」』】])*\s*$)/u, ""))
+    .join("\n");
 }
 
 function chunkReplyText(text, limit = 3500) {
