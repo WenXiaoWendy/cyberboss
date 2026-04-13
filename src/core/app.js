@@ -16,6 +16,7 @@ const { DeferredSystemReplyStore } = require("./deferred-system-reply-store");
 const { SystemMessageQueueStore } = require("./system-message-queue-store");
 const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
+const { TurnGateStore } = require("./turn-gate-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 
@@ -40,6 +41,9 @@ class CyberbossApp {
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
+    this.turnGateStore = new TurnGateStore();
+    this.pendingInboundByScope = new Map();
+    this.turnBoundaryScopeKeys = new Set();
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -120,6 +124,7 @@ class CyberbossApp {
       while (!shutdown.stopped) {
         try {
           await this.flushDueReminders(account);
+          await this.flushPendingInboundMessages();
           await this.flushPendingSystemMessages();
           await this.flushPendingTimelineScreenshots(account);
           const response = await this.channelAdapter.getUpdates({
@@ -128,7 +133,7 @@ class CyberbossApp {
           });
           assertWeixinUpdateResponse(response);
           consecutiveFailures = 0;
-          const messages = Array.isArray(response?.msgs) ? response.msgs : [];
+          const messages = sortInboundUpdateMessages(Array.isArray(response?.msgs) ? response.msgs : []);
           for (const message of messages) {
             if (shutdown.stopped) {
               break;
@@ -136,6 +141,7 @@ class CyberbossApp {
             await this.handleIncomingMessage(message);
           }
           await this.flushDueReminders(account);
+          await this.flushPendingInboundMessages();
           await this.flushPendingSystemMessages();
           await this.flushPendingTimelineScreenshots(account);
         } catch (error) {
@@ -313,10 +319,33 @@ class CyberbossApp {
       return;
     }
 
+    if (this.isTurnDispatchBlocked(bindingKey, workspaceRoot)) {
+      this.bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared });
+      return;
+    }
+
+    await this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+  }
+
+  isTurnDispatchBlocked(bindingKey, workspaceRoot, { ignoreBoundary = false } = {}) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
+    if (!ignoreBoundary && scopeKey && this.turnBoundaryScopeKeys?.has(scopeKey)) {
+      return true;
+    }
+    if (this.turnGateStore.isPending(bindingKey, workspaceRoot)) {
+      return true;
+    }
+    const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
+    const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
+    return threadState?.status === "running" || hasRpcId(threadState?.pendingApproval?.requestId);
+  }
+
+  async dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared }) {
+    const pendingScopeKey = this.turnGateStore.begin(bindingKey, workspaceRoot);
     await this.channelAdapter.sendTyping({
-      userId: normalized.senderId,
+      userId: prepared.senderId,
       status: 1,
-      contextToken: normalized.contextToken,
+      contextToken: prepared.contextToken,
     }).catch(() => {});
 
     try {
@@ -331,24 +360,105 @@ class CyberbossApp {
           senderId: prepared.senderId,
         },
       });
-      this.streamDelivery.queueReplyTargetForThread(turn.threadId, {
+      this.turnGateStore.attachThread(pendingScopeKey, turn.threadId);
+      const replyTarget = {
         userId: prepared.senderId,
         contextToken: prepared.contextToken,
         provider: prepared.provider,
-      });
+      };
+      if (turn.turnId) {
+        this.streamDelivery.bindReplyTargetForTurn({
+          threadId: turn.threadId,
+          turnId: turn.turnId,
+          target: replyTarget,
+        });
+      } else {
+        this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
+      }
       this.scheduleRuntimeEventWatchdog({
         bindingKey,
         workspaceRoot,
         normalized: prepared,
         threadId: turn.threadId,
       });
+      return true;
     } catch (error) {
+      this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
       await this.channelAdapter.sendText({
-        userId: normalized.senderId,
+        userId: prepared.senderId,
         text: `Request failed: ${messageText}`,
-        contextToken: normalized.contextToken,
+        contextToken: prepared.contextToken,
       }).catch(() => {});
+      return false;
+    }
+  }
+
+  bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared }) {
+    const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
+    if (!scopeKey || !prepared) {
+      return;
+    }
+
+    const current = this.pendingInboundByScope.get(scopeKey) || {
+      bindingKey,
+      workspaceRoot,
+      messages: [],
+    };
+    current.messages.push({
+      workspaceId: prepared.workspaceId,
+      accountId: prepared.accountId,
+      senderId: prepared.senderId,
+      messageId: prepared.messageId,
+      contextToken: prepared.contextToken,
+      provider: prepared.provider,
+      text: prepared.text,
+      receivedAt: prepared.receivedAt,
+    });
+    this.pendingInboundByScope.set(scopeKey, current);
+    void this.channelAdapter.sendTyping({
+      userId: prepared.senderId,
+      status: 1,
+      contextToken: prepared.contextToken,
+    }).catch(() => {});
+  }
+
+  hasPendingInboundMessage(bindingKey, workspaceRoot) {
+    return this.pendingInboundByScope.has(buildScopeKey(bindingKey, workspaceRoot));
+  }
+
+  async flushPendingInboundMessages({ bindingKey = "", workspaceRoot = "", ignoreBoundary = false } = {}) {
+    const targetScopeKey = buildScopeKey(bindingKey, workspaceRoot);
+    const scopeEntries = targetScopeKey
+      ? [[targetScopeKey, this.pendingInboundByScope.get(targetScopeKey) || null]]
+      : [...this.pendingInboundByScope.entries()];
+
+    for (const [scopeKey, draft] of scopeEntries) {
+      if (!draft?.bindingKey || !draft?.workspaceRoot) {
+        this.pendingInboundByScope.delete(scopeKey);
+        continue;
+      }
+      if (this.isTurnDispatchBlocked(draft.bindingKey, draft.workspaceRoot, { ignoreBoundary })) {
+        continue;
+      }
+      const merged = mergePendingInboundDraft(draft);
+      this.pendingInboundByScope.delete(scopeKey);
+      const dispatched = await this.dispatchPreparedTurn({
+        bindingKey: merged.bindingKey,
+        workspaceRoot: merged.workspaceRoot,
+        prepared: {
+          workspaceId: merged.workspaceId,
+          accountId: merged.accountId,
+          senderId: merged.senderId,
+          contextToken: merged.contextToken,
+          provider: merged.provider,
+          text: merged.text,
+          receivedAt: merged.receivedAt,
+        },
+      });
+      if (!dispatched) {
+        this.pendingInboundByScope.set(scopeKey, draft);
+      }
     }
   }
 
@@ -598,13 +708,10 @@ class CyberbossApp {
       senderId: prepared.senderId,
     });
     const workspaceRoot = prepared.workspaceRoot || this.resolveWorkspaceRoot(bindingKey);
-    const threadId = this.runtimeAdapter.getSessionStore().getThreadIdForWorkspace(bindingKey, workspaceRoot);
-    const threadState = threadId ? this.threadStateStore.getThreadState(threadId) : null;
-    if (threadState?.status === "running" || hasRpcId(threadState?.pendingApproval?.requestId)) {
+    if (this.isTurnDispatchBlocked(bindingKey, workspaceRoot)) {
       return false;
     }
-    await this.handlePreparedMessage(prepared, { allowCommands: false });
-    return true;
+    return this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
   }
 
   async dispatchChannelCommand(normalized, command) {
@@ -994,9 +1101,41 @@ class CyberbossApp {
     }
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
       this.runtimeAdapter.getSessionStore().clearApprovalPrompt(event.payload.threadId);
-      await this.stopTypingForThread(event.payload.threadId);
-      if (event.type === "runtime.turn.failed") {
-        await this.sendFailureToThread(event.payload.threadId, event.payload.text || "Execution failed");
+      const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(event.payload.threadId);
+      const scopeKey = linked?.bindingKey && linked?.workspaceRoot
+        ? buildScopeKey(linked.bindingKey, linked.workspaceRoot)
+        : "";
+      if (scopeKey) {
+        this.turnBoundaryScopeKeys.add(scopeKey);
+      }
+      try {
+        this.turnGateStore.releaseThread(event.payload.threadId);
+        if (event.type === "runtime.turn.failed") {
+          await this.sendFailureToThread(event.payload.threadId, event.payload.text || "Execution failed");
+        }
+        if (linked?.bindingKey && linked?.workspaceRoot) {
+          await this.flushPendingInboundMessages({
+            bindingKey: linked.bindingKey,
+            workspaceRoot: linked.workspaceRoot,
+            ignoreBoundary: true,
+          });
+        } else {
+          await this.flushPendingInboundMessages();
+        }
+        await this.flushPendingSystemMessages();
+        const shouldKeepTyping = linked?.bindingKey && linked?.workspaceRoot
+          ? (
+            this.turnGateStore.isPending(linked.bindingKey, linked.workspaceRoot)
+            || this.hasPendingInboundMessage(linked.bindingKey, linked.workspaceRoot)
+          )
+          : false;
+        if (!shouldKeepTyping) {
+          await this.stopTypingForThread(event.payload.threadId);
+        }
+      } finally {
+        if (scopeKey) {
+          this.turnBoundaryScopeKeys.delete(scopeKey);
+        }
       }
       return;
     }
@@ -1499,6 +1638,51 @@ function buildReminderSystemTrigger(reminder, config = {}) {
   return `Due reminder for ${userName}: ${reminderText}`;
 }
 
+function buildScopeKey(bindingKey, workspaceRoot) {
+  const normalizedBindingKey = normalizeText(bindingKey);
+  const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
+  if (!normalizedBindingKey || !normalizedWorkspaceRoot) {
+    return "";
+  }
+  return `${normalizedBindingKey}::${normalizedWorkspaceRoot}`;
+}
+
+function mergePendingInboundDraft(draft) {
+  const queued = Array.isArray(draft?.messages)
+    ? draft.messages
+      .filter((message) => message && typeof message === "object")
+      .slice()
+      .sort(comparePendingInboundMessages)
+    : [];
+  if (!queued.length) {
+    return null;
+  }
+  if (queued.length === 1) {
+    return {
+      bindingKey: draft.bindingKey,
+      workspaceRoot: draft.workspaceRoot,
+      ...queued[0],
+    };
+  }
+
+  const latest = queued[queued.length - 1];
+  const blocks = queued
+    .map((message) => String(message.text || "").trim())
+    .filter(Boolean);
+
+  return {
+    bindingKey: draft.bindingKey,
+    workspaceRoot: draft.workspaceRoot,
+    ...latest,
+    text: [
+      "Multiple newer WeChat messages arrived while you were still handling the previous turn.",
+      "Treat the following blocks as one ordered batch of fresh user input and respond once after considering all of them.",
+      "",
+      blocks.join("\n\n"),
+    ].join("\n").trim(),
+  };
+}
+
 function buildCodexInboundText(normalized, persisted = {}, config = {}) {
   const text = String(normalized?.text || "").trim();
   const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
@@ -1549,6 +1733,69 @@ function buildCodexInboundText(normalized, persisted = {}, config = {}) {
   }
 
   return lines.join("\n").trim();
+}
+
+function sortInboundUpdateMessages(messages) {
+  return Array.isArray(messages)
+    ? messages.slice().sort(compareRawInboundUpdateMessages)
+    : [];
+}
+
+function compareRawInboundUpdateMessages(left, right) {
+  const leftTime = resolveRawInboundMessageTimeMs(left);
+  const rightTime = resolveRawInboundMessageTimeMs(right);
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  const leftMessageId = parseMessageIdForOrdering(left?.message_id);
+  const rightMessageId = parseMessageIdForOrdering(right?.message_id);
+  if (leftMessageId !== rightMessageId) {
+    return leftMessageId - rightMessageId;
+  }
+
+  const leftSeq = parseNumericOrderValue(left?.seq);
+  const rightSeq = parseNumericOrderValue(right?.seq);
+  if (leftSeq !== rightSeq) {
+    return leftSeq - rightSeq;
+  }
+
+  return String(left?.client_id || "").localeCompare(String(right?.client_id || ""));
+}
+
+function resolveRawInboundMessageTimeMs(message) {
+  const createdAtMs = parseNumericOrderValue(message?.create_time_ms);
+  if (createdAtMs > 0) {
+    return createdAtMs;
+  }
+  const createdAtSeconds = parseNumericOrderValue(message?.create_time);
+  return createdAtSeconds > 0 ? createdAtSeconds * 1000 : 0;
+}
+
+function comparePendingInboundMessages(left, right) {
+  const leftTime = Date.parse(String(left?.receivedAt || "")) || 0;
+  const rightTime = Date.parse(String(right?.receivedAt || "")) || 0;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  const leftMessageId = parseMessageIdForOrdering(left?.messageId);
+  const rightMessageId = parseMessageIdForOrdering(right?.messageId);
+  if (leftMessageId !== rightMessageId) {
+    return leftMessageId - rightMessageId;
+  }
+
+  return String(left?.text || "").localeCompare(String(right?.text || ""));
+}
+
+function parseMessageIdForOrdering(value) {
+  const numeric = parseNumericOrderValue(value);
+  return numeric > 0 ? numeric : Number.MAX_SAFE_INTEGER;
+}
+
+function parseNumericOrderValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function buildIncomingCommandGuide(normalized, persisted = {}) {

@@ -93,6 +93,38 @@ test("system send_message JSON sends only the message text", async () => {
   });
 });
 
+test("explicit turn target binding overrides the binding-level fallback", async () => {
+  const { sent, streamDelivery, bindingByThreadId } = createHarness();
+  bindingByThreadId.set("thread-2b", { bindingKey: "binding-2b" });
+  streamDelivery.setReplyTarget("binding-2b", {
+    userId: "user-2b",
+    contextToken: "ctx-weixin",
+    provider: "weixin",
+  });
+  streamDelivery.bindReplyTargetForTurn({
+    threadId: "thread-2b",
+    turnId: "turn-2b",
+    target: {
+      userId: "user-2b",
+      contextToken: "ctx-system",
+      provider: "system",
+    },
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-2b",
+    turnId: "turn-2b",
+    itemId: "item-2b",
+    text: "{\"action\":\"send_message\",\"message\":\"只发系统消息\"}",
+  });
+
+  assert.deepEqual(sent, [{
+    userId: "user-2b",
+    text: "只发系统消息",
+    contextToken: "ctx-system",
+  }]);
+});
+
 test("thread-level system target overrides an already attached binding target", async () => {
   const { sent, streamDelivery, bindingByThreadId } = createHarness();
   bindingByThreadId.set("thread-3", { bindingKey: "binding-3" });
@@ -130,6 +162,62 @@ test("thread-level system target overrides an already attached binding target", 
   assert.deepEqual(sent, []);
 });
 
+test("thread-level targets are consumed in turn order instead of overwriting active runs", async () => {
+  const { sent, streamDelivery, bindingByThreadId } = createHarness();
+  bindingByThreadId.set("thread-3b", { bindingKey: "binding-3b" });
+  streamDelivery.setReplyTarget("binding-3b", {
+    userId: "user-3b",
+    contextToken: "ctx-binding",
+    provider: "weixin",
+  });
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.started",
+    payload: { threadId: "thread-3b", turnId: "turn-a" },
+  });
+  streamDelivery.queueReplyTargetForThread("thread-3b", {
+    userId: "user-3b",
+    contextToken: "ctx-system",
+    provider: "system",
+  });
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.started",
+    payload: { threadId: "thread-3b", turnId: "turn-b" },
+  });
+  streamDelivery.queueReplyTargetForThread("thread-3b", {
+    userId: "user-3b",
+    contextToken: "ctx-weixin",
+    provider: "weixin",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-3b",
+    turnId: "turn-a",
+    itemId: "item-a",
+    text: "{\"action\":\"send_message\",\"message\":\"先发系统消息\"}",
+  });
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-3b",
+    turnId: "turn-b",
+    itemId: "item-b",
+    text: "再发普通消息",
+  });
+
+  assert.deepEqual(sent, [
+    {
+      userId: "user-3b",
+      text: "先发系统消息",
+      contextToken: "ctx-system",
+    },
+    {
+      userId: "user-3b",
+      text: "再发普通消息",
+      contextToken: "ctx-weixin",
+    },
+  ]);
+});
+
 test("plain weixin reply still strips protocol leak text", async () => {
   const { sent, streamDelivery } = createHarness();
   streamDelivery.queueReplyTargetForThread("thread-4", {
@@ -150,6 +238,62 @@ test("plain weixin reply still strips protocol leak text", async () => {
     userId: "user-4",
     text: "好的。",
     contextToken: "ctx-4",
+  });
+});
+
+test("plain weixin reply does not leak a standalone structured action payload", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-4c", {
+    userId: "user-4c",
+    contextToken: "ctx-4c",
+    provider: "weixin",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-4c",
+    turnId: "turn-4c",
+    itemId: "item-4c",
+    text: "json:{\"action\":\"send_message\",\"message\":\"我接得住。\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    userId: "user-4c",
+    text: "我接得住。",
+    contextToken: "ctx-4c",
+  });
+});
+
+test("plain weixin reply sends finalized item text even if earlier streaming text was different", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-4b", {
+    userId: "user-4b",
+    contextToken: "ctx-4b",
+    provider: "weixin",
+  });
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.started",
+    payload: { threadId: "thread-4b", turnId: "turn-4b" },
+  });
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.reply.delta",
+    payload: { threadId: "thread-4b", turnId: "turn-4b", itemId: "item-4b", text: "先写很长的一版" },
+  });
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.reply.completed",
+    payload: { threadId: "thread-4b", turnId: "turn-4b", itemId: "item-4b", text: "改短了" },
+  });
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.completed",
+    payload: { threadId: "thread-4b", turnId: "turn-4b" },
+  });
+
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    userId: "user-4b",
+    text: "改短了",
+    contextToken: "ctx-4b",
   });
 });
 
@@ -264,7 +408,7 @@ test("plain reply prepends deferred prefix to the next reply", async () => {
   });
 });
 
-test("plain reply with deferred prefix waits until turn completion before sending", async () => {
+test("plain reply with deferred prefix is sent as soon as the first item is finalized", async () => {
   const { sent, streamDelivery, bindingByThreadId } = createHarness();
   bindingByThreadId.set("thread-8", { bindingKey: "binding-8" });
   streamDelivery.setReplyTarget("binding-8", {
@@ -289,13 +433,6 @@ test("plain reply with deferred prefix waits until turn completion before sendin
       itemId: "item-8",
       text: "第一段",
     },
-  });
-
-  assert.deepEqual(sent, []);
-
-  await streamDelivery.handleRuntimeEvent({
-    type: "runtime.turn.completed",
-    payload: { threadId: "thread-8", turnId: "turn-8" },
   });
 
   assert.equal(sent.length, 1);

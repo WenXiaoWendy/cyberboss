@@ -6,6 +6,7 @@ const {
   extractAssistantText,
   extractFailureText,
   extractThreadId,
+  extractTurnId,
   extractThreadIdFromParams,
   extractTurnIdFromParams,
   isAssistantItemCompleted,
@@ -149,13 +150,16 @@ function createCodexRuntimeAdapter(config) {
         });
       }
 
-      await runtimeClient.sendUserMessage({
+      const response = await runtimeClient.sendUserMessage({
         threadId,
         text: outboundText,
         model,
         workspaceRoot,
       });
-      return { threadId };
+      return {
+        threadId,
+        turnId: extractTurnId(response),
+      };
     },
   };
 }

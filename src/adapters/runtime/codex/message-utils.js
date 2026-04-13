@@ -2,6 +2,15 @@ function extractThreadId(response) {
   return response?.result?.thread?.id || null;
 }
 
+function extractTurnId(response) {
+  return normalizeIdentifier(
+    response?.result?.turn?.id
+    || response?.result?.turnId
+    || response?.result?.turn_id
+    || response?.result?.id
+  );
+}
+
 function extractThreadIdFromParams(params) {
   return normalizeIdentifier(params?.threadId);
 }
@@ -103,6 +112,7 @@ module.exports = {
   extractAssistantText,
   extractFailureText,
   extractThreadId,
+  extractTurnId,
   extractThreadIdFromParams,
   extractTurnIdFromParams,
   isAssistantItemCompleted,

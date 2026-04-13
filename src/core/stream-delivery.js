@@ -14,9 +14,11 @@ class StreamDelivery {
       ? sameTokenRetryDelayMs
       : 800;
     this.replyTargetByBindingKey = new Map();
-    this.replyTargetByThreadId = new Map();
+    this.replyTargetByTurnKey = new Map();
+    this.replyTargetQueueByThreadId = new Map();
     this.deferredReplyPrefixByBindingKey = new Map();
     this.stateByRunKey = new Map();
+    this.runSequence = 0;
   }
 
   setReplyTarget(bindingKey, target) {
@@ -32,16 +34,31 @@ class StreamDelivery {
 
   queueReplyTargetForThread(threadId, target) {
     const normalizedThreadId = normalizeText(threadId);
-    if (!normalizedThreadId || !target?.userId || !target?.contextToken) {
+    const normalizedTarget = normalizeReplyTarget(target);
+    if (!normalizedThreadId || !normalizedTarget) {
       return;
     }
-    const normalizedTarget = {
-      userId: String(target.userId).trim(),
-      contextToken: String(target.contextToken).trim(),
-      provider: normalizeText(target.provider),
-    };
-    this.replyTargetByThreadId.set(normalizedThreadId, normalizedTarget);
-    this.bindReplyTargetToActiveThreadRuns(normalizedThreadId, normalizedTarget);
+    const queue = this.replyTargetQueueByThreadId.get(normalizedThreadId) || [];
+    queue.push(normalizedTarget);
+    this.replyTargetQueueByThreadId.set(normalizedThreadId, queue);
+    this.bindQueuedReplyTargetsToActiveThreadRuns(normalizedThreadId);
+  }
+
+  bindReplyTargetForTurn({ threadId = "", turnId = "", target = null } = {}) {
+    const normalizedThreadId = normalizeText(threadId);
+    const normalizedTurnId = normalizeText(turnId);
+    const normalizedTarget = normalizeReplyTarget(target);
+    if (!normalizedThreadId || !normalizedTurnId || !normalizedTarget) {
+      this.queueReplyTargetForThread(normalizedThreadId, target);
+      return;
+    }
+
+    const runKey = buildRunKey(normalizedThreadId, normalizedTurnId);
+    this.replyTargetByTurnKey.set(runKey, normalizedTarget);
+    const activeState = this.stateByRunKey.get(runKey);
+    if (activeState) {
+      this.applyThreadReplyTarget(activeState, normalizedTarget);
+    }
   }
 
   setDeferredReplyPrefix(bindingKey, text) {
@@ -117,9 +134,11 @@ class StreamDelivery {
       turnId: normalizeText(turnId),
       itemOrder: [],
       items: new Map(),
-      sentText: "",
+      sentItemIds: new Set(),
       sendChain: Promise.resolve(),
       flushPromise: null,
+      sequence: this.runSequence += 1,
+      threadReplyTargetAttached: false,
     };
     this.stateByRunKey.set(runKey, created);
     this.attachReplyTarget(created);
@@ -127,11 +146,16 @@ class StreamDelivery {
   }
 
   attachReplyTarget(state) {
-    if (!state.replyTarget) {
-      const threadTarget = this.replyTargetByThreadId.get(state.threadId) || null;
+    if (!state.threadReplyTargetAttached && state.turnId) {
+      const exactTurnTarget = this.replyTargetByTurnKey.get(buildRunKey(state.threadId, state.turnId)) || null;
+      if (exactTurnTarget) {
+        this.applyThreadReplyTarget(state, exactTurnTarget);
+      }
+    }
+    if (!state.threadReplyTargetAttached) {
+      const threadTarget = this.consumeQueuedReplyTarget(state.threadId);
       if (threadTarget) {
-        state.replyTarget = threadTarget;
-        this.replyTargetByThreadId.delete(state.threadId);
+        this.applyThreadReplyTarget(state, threadTarget);
       }
     }
     const linked = this.sessionStore.findBindingForThreadId(state.threadId);
@@ -217,74 +241,46 @@ class StreamDelivery {
       return;
     }
 
-    const replyText = buildReplyText(state, { completedOnly: !force });
-    const structuredAction = maybeResolveStructuredAction(replyText);
-    if (structuredAction) {
-      await this.flushStructuredAction(state, { structuredAction, replyText, strict: state.replyTarget.provider === "system" });
-      return;
-    }
     if (state.replyTarget.provider === "system") {
-      await this.flushSystemReply(state, { force, replyText });
-      return;
-    }
-    if (state.deferredReplyPrefix && !force) {
+      await this.flushSystemReply(state, { force });
       return;
     }
 
-    const plainText = markdownToPlainText(replyText);
-    const baseSafeText = sanitizeReplyText(plainText);
-    const safeText = buildEffectiveReplyText(state.deferredReplyPrefix, baseSafeText);
-    if (!safeText || safeText === state.sentText) {
+    const pendingDeliveries = collectPendingReplyDeliveries(state, { force });
+    if (!pendingDeliveries.length) {
       return;
     }
 
-    if (state.sentText && !safeText.startsWith(state.sentText)) {
-      console.warn(`[cyberboss] skip non-monotonic reply thread=${state.threadId}`);
-      return;
-    }
-
-    const delta = safeText.slice(state.sentText.length);
-    if (!delta) {
-      return;
-    }
-
-    if (!delta.trim()) {
-      state.sentText = safeText;
-      return;
-    }
-
-    state.sentText = safeText;
     state.sendChain = state.sendChain.then(async () => {
-      const payload = {
-        userId: state.replyTarget.userId,
-        text: delta,
-        contextToken: state.replyTarget.contextToken,
-      };
-      if (state.deferredReplyPrefix) {
-        payload.preserveBlock = true;
+      for (let index = 0; index < pendingDeliveries.length; index += 1) {
+        const delivery = pendingDeliveries[index];
+        await this.sendReplyDelivery(state, delivery, {
+          prependDeferredPrefix: index === 0 && Boolean(state.deferredReplyPrefix),
+        });
+        state.sentItemIds.add(delivery.itemId);
+        if (index === 0 && state.deferredReplyPrefix) {
+          state.deferredReplyPrefix = "";
+        }
       }
-      await this.channelAdapter.sendText(payload);
     }).catch((error) => {
-      void this.deferSystemReply(state, delta, error, "plain_reply");
+      const failedDelivery = pendingDeliveries[0];
+      const failedText = buildDeliveryPreviewText(failedDelivery);
+      void this.deferSystemReply(state, buildEffectiveReplyText(state.deferredReplyPrefix, failedText), error, "plain_reply");
       console.error(`[cyberboss] failed to deliver reply thread=${state.threadId}: ${error.message}`);
     });
 
     await state.sendChain;
   }
 
-  async flushSystemReply(state, { force, replyText }) {
+  async flushSystemReply(state, { force }) {
     if (!force) {
       return;
     }
 
+    const replyText = buildReplyText(state, { completedOnly: false });
     const resolved = resolveSystemReplyAction(replyText);
-    await this.flushStructuredAction(state, { structuredAction: resolved, replyText, strict: true });
-  }
-
-  async flushStructuredAction(state, { structuredAction, replyText, strict }) {
-    const resolved = structuredAction;
     if (resolved.kind === "silent") {
-      state.sentText = "";
+      this.markAllItemsSent(state);
       console.log(
         `[cyberboss] suppressed system reply thread=${state.threadId} action=silent preview=${JSON.stringify(replyText.slice(0, 120))}`
       );
@@ -292,22 +288,15 @@ class StreamDelivery {
     }
 
     if (resolved.kind !== "send_message") {
-      if (strict || resolved.kind === "invalid") {
-        console.error(
-          `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
-        );
-      }
-      return;
-    }
-
-    const safeText = resolved.message;
-    if (!safeText || safeText === state.sentText) {
+      console.error(
+        `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
+      );
       return;
     }
 
     state.sendChain = state.sendChain.then(async () => {
-      await this.sendSystemReply(state, safeText);
-      state.sentText = safeText;
+      await this.sendSystemReply(state, resolved.message);
+      this.markAllItemsSent(state);
     }).catch((error) => {
       console.error(`[cyberboss] failed to deliver system reply thread=${state.threadId}: ${error.message}`);
     });
@@ -315,19 +304,57 @@ class StreamDelivery {
     await state.sendChain;
   }
 
+  async sendReplyDelivery(state, delivery, { prependDeferredPrefix = false } = {}) {
+    if (!delivery || !state.replyTarget) {
+      return;
+    }
+
+    if (delivery.kind === "silent") {
+      return;
+    }
+
+    if (delivery.kind === "invalid_action") {
+      console.error(
+        `[cyberboss] invalid structured action item thread=${state.threadId} reason=${delivery.reason} preview=${JSON.stringify((delivery.sourceText || "").slice(0, 160))}`
+      );
+      return;
+    }
+
+    const baseText = delivery.kind === "action" ? delivery.message : delivery.text;
+    if (!baseText) {
+      return;
+    }
+
+    const payload = {
+      userId: state.replyTarget.userId,
+      text: prependDeferredPrefix ? buildEffectiveReplyText(state.deferredReplyPrefix, baseText) : baseText,
+      contextToken: state.replyTarget.contextToken,
+    };
+    if (prependDeferredPrefix) {
+      payload.preserveBlock = true;
+    }
+    await this.sendTextWithRetry(state, payload, { kind: "plain_reply" });
+  }
+
   async sendSystemReply(state, text) {
     const initialTarget = state.replyTarget;
+    const payload = {
+      userId: initialTarget.userId,
+      text,
+      contextToken: initialTarget.contextToken,
+    };
+    await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+  }
+
+  async sendTextWithRetry(state, payload, { kind }) {
+    const initialTarget = state.replyTarget;
     try {
-      await this.channelAdapter.sendText({
-        userId: initialTarget.userId,
-        text,
-        contextToken: initialTarget.contextToken,
-      });
+      await this.channelAdapter.sendText(payload);
       return;
     } catch (error) {
-      const retryTarget = this.resolveRetriableSystemReplyTarget(initialTarget, error);
+      const retryTarget = this.resolveRetriableReplyTarget(initialTarget, error);
       if (!retryTarget) {
-        const deferred = await this.deferSystemReply(state, text, error, "system_reply");
+        const deferred = await this.deferSystemReply(state, payload.text, error, kind);
         if (deferred) {
           return;
         }
@@ -337,11 +364,15 @@ class StreamDelivery {
         `[cyberboss] system reply retrying with refreshed context token thread=${state.threadId} user=${retryTarget.userId}`
       );
       try {
-        await this.channelAdapter.sendText({
+        const retryPayload = {
           userId: retryTarget.userId,
-          text,
+          text: payload.text,
           contextToken: retryTarget.contextToken,
-        });
+        };
+        if (payload.preserveBlock) {
+          retryPayload.preserveBlock = true;
+        }
+        await this.channelAdapter.sendText(retryPayload);
         state.replyTarget = retryTarget;
         if (state.bindingKey) {
           this.replyTargetByBindingKey.set(state.bindingKey, {
@@ -351,7 +382,7 @@ class StreamDelivery {
           });
         }
       } catch (retryError) {
-        const deferred = await this.deferSystemReply(state, text, retryError, "system_reply");
+        const deferred = await this.deferSystemReply(state, payload.text, retryError, kind);
         if (deferred) {
           return;
         }
@@ -389,7 +420,7 @@ class StreamDelivery {
     }
   }
 
-  resolveRetriableSystemReplyTarget(currentTarget, error) {
+  resolveRetriableReplyTarget(currentTarget, error) {
     if (!isSystemReplyContextFailure(error)) {
       return null;
     }
@@ -416,23 +447,58 @@ class StreamDelivery {
     if (!normalizedRunKey) {
       return;
     }
-    const state = this.stateByRunKey.get(normalizedRunKey) || null;
-    if (state?.threadId) {
-      this.replyTargetByThreadId.delete(state.threadId);
-    }
+    this.replyTargetByTurnKey.delete(normalizedRunKey);
     this.stateByRunKey.delete(normalizedRunKey);
   }
 
-  bindReplyTargetToActiveThreadRuns(threadId, target) {
-    for (const state of this.stateByRunKey.values()) {
-      if (state.threadId !== threadId) {
-        continue;
+  bindQueuedReplyTargetsToActiveThreadRuns(threadId) {
+    const queue = this.replyTargetQueueByThreadId.get(threadId);
+    if (!Array.isArray(queue) || !queue.length) {
+      return;
+    }
+    const states = [...this.stateByRunKey.values()]
+      .filter((state) => state.threadId === threadId && !state.threadReplyTargetAttached)
+      .sort((left, right) => left.sequence - right.sequence);
+    for (const state of states) {
+      const nextTarget = queue.shift();
+      if (!nextTarget) {
+        break;
       }
-      state.replyTarget = {
-        userId: target.userId,
-        contextToken: target.contextToken,
-        provider: target.provider,
-      };
+      this.applyThreadReplyTarget(state, nextTarget);
+    }
+    if (queue.length) {
+      this.replyTargetQueueByThreadId.set(threadId, queue);
+      return;
+    }
+    this.replyTargetQueueByThreadId.delete(threadId);
+  }
+
+  consumeQueuedReplyTarget(threadId) {
+    const queue = this.replyTargetQueueByThreadId.get(threadId);
+    if (!Array.isArray(queue) || !queue.length) {
+      return null;
+    }
+    const target = queue.shift() || null;
+    if (queue.length) {
+      this.replyTargetQueueByThreadId.set(threadId, queue);
+    } else {
+      this.replyTargetQueueByThreadId.delete(threadId);
+    }
+    return target;
+  }
+
+  applyThreadReplyTarget(state, target) {
+    state.replyTarget = {
+      userId: target.userId,
+      contextToken: target.contextToken,
+      provider: target.provider,
+    };
+    state.threadReplyTargetAttached = true;
+  }
+
+  markAllItemsSent(state) {
+    for (const itemId of state.itemOrder) {
+      state.sentItemIds.add(itemId);
     }
   }
 }
@@ -462,6 +528,48 @@ function buildReplyText(state, { completedOnly }) {
     }
   }
   return parts.join("\n\n");
+}
+
+function collectPendingReplyDeliveries(state, { force }) {
+  const pending = [];
+  for (const itemId of state.itemOrder) {
+    if (state.sentItemIds.has(itemId)) {
+      continue;
+    }
+    const item = state.items.get(itemId);
+    if (!item) {
+      continue;
+    }
+    const sourceText = resolvePlainReplySourceText(item, force);
+    if (!sourceText) {
+      continue;
+    }
+    const structuredAction = classifyReplyItemSourceText(sourceText);
+    if (structuredAction) {
+      pending.push(buildActionDelivery(itemId, sourceText, structuredAction));
+      continue;
+    }
+    const plainText = markdownToPlainText(sourceText);
+    const sanitizedText = sanitizeReplyText(plainText);
+    if (!sanitizedText) {
+      continue;
+    }
+    pending.push({ itemId, kind: "plain", text: sanitizedText });
+  }
+  return pending;
+}
+
+function resolvePlainReplySourceText(item, force) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+  if (item.completed) {
+    return trimOuterBlankLines(item.completedText || item.currentText || "");
+  }
+  if (!force) {
+    return "";
+  }
+  return trimOuterBlankLines(item.currentText || "");
 }
 
 function buildEffectiveReplyText(deferredPrefix, replyText) {
@@ -538,6 +646,17 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeReplyTarget(target) {
+  if (!target?.userId || !target?.contextToken) {
+    return null;
+  }
+  return {
+    userId: String(target.userId).trim(),
+    contextToken: String(target.contextToken).trim(),
+    provider: normalizeText(target.provider),
+  };
+}
+
 function normalizeLineEndings(value) {
   return String(value || "").replace(/\r\n/g, "\n");
 }
@@ -585,23 +704,57 @@ function resolveSystemReplyAction(replyText) {
   return { kind: "send_message", message };
 }
 
-function maybeResolveStructuredAction(replyText) {
+function classifyReplyItemSourceText(replyText) {
   const normalized = normalizeLineEndings(String(replyText || "")).trim();
   if (!normalized) {
     return null;
   }
-  const candidate = extractSystemActionJsonCandidate(normalized);
+  const unfenced = unwrapJsonCodeFence(normalized) || normalized;
+  const stripped = unfenced.replace(/^json\s*:\s*/i, "").trim();
+  const candidate = extractSystemActionJsonCandidate(stripped) || (stripped.startsWith("{") ? stripped : "");
   if (!candidate) {
     return null;
   }
-  const parsed = tryParseJson(candidate);
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-    return null;
-  }
-  if (!("action" in parsed) && !("cyberboss_action" in parsed)) {
+  if (candidate !== stripped) {
     return null;
   }
   return resolveSystemReplyAction(candidate);
+}
+
+function unwrapJsonCodeFence(text) {
+  const match = String(text || "").trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function buildActionDelivery(itemId, sourceText, action) {
+  if (!action || typeof action !== "object") {
+    return null;
+  }
+  if (action.kind === "silent") {
+    return { itemId, kind: "silent", sourceText };
+  }
+  if (action.kind === "send_message") {
+    return { itemId, kind: "action", sourceText, message: action.message };
+  }
+  return {
+    itemId,
+    kind: "invalid_action",
+    sourceText,
+    reason: action.reason || "invalid structured action",
+  };
+}
+
+function buildDeliveryPreviewText(delivery) {
+  if (!delivery || typeof delivery !== "object") {
+    return "";
+  }
+  if (delivery.kind === "action") {
+    return delivery.message || "";
+  }
+  if (delivery.kind === "plain") {
+    return delivery.text || "";
+  }
+  return "";
 }
 
 function normalizeSystemActionName(value) {
