@@ -159,7 +159,13 @@ function createClaudeCodeRuntimeAdapter(config) {
       }
       return { threadId, turnId };
     },
-    async resumeThread({ threadId }) {
+    async resumeThread({ threadId, workspaceRoot = "" }) {
+      if (!workspaceRoot) {
+        return { threadId };
+      }
+      await closeWorkspaceClient(workspaceRoot);
+      const client = ensureClient(workspaceRoot);
+      await client.connect(threadId || "");
       return { threadId };
     },
     async refreshThreadInstructions({ threadId, workspaceRoot, model = "" }) {

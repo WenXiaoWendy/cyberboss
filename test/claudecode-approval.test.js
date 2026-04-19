@@ -197,6 +197,50 @@ test("handleNewCommand asks runtime to start a fresh draft before clearing the s
   ]);
 });
 
+test("handleSwitchCommand passes workspaceRoot so claudecode can switch the live session", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      async resumeThread(payload) {
+        calls.push(["resume", payload]);
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId) {
+            calls.push(["set", bindingKey, workspaceRoot, threadId]);
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(["send", payload.text]);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleSwitchCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  }, {
+    args: "thread-2",
+  });
+
+  assert.deepEqual(calls, [
+    ["resume", { threadId: "thread-2", workspaceRoot: "/workspace" }],
+    ["set", "binding-1", "/workspace", "thread-2"],
+    ["send", "✅ Thread switched\nworkspace: /workspace\nthread: thread-2"],
+  ]);
+});
+
 test("handleRuntimeEvent auto-approves built-in view_image approvals without prompting", async () => {
   const responses = [];
   const appLike = {
