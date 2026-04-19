@@ -75,6 +75,24 @@ function createClaudeCodeRuntimeAdapter(config) {
     return client;
   }
 
+  async function closeWorkspaceClient(workspaceRoot) {
+    const normalizedWorkspaceRoot = typeof workspaceRoot === "string" ? workspaceRoot.trim() : "";
+    if (!normalizedWorkspaceRoot) {
+      return;
+    }
+    const client = clientsByWorkspace.get(normalizedWorkspaceRoot);
+    if (!client) {
+      return;
+    }
+    await client.close();
+    clientsByWorkspace.delete(normalizedWorkspaceRoot);
+    for (const [requestId, candidateWorkspaceRoot] of pendingApprovals.entries()) {
+      if (candidateWorkspaceRoot === normalizedWorkspaceRoot) {
+        pendingApprovals.delete(requestId);
+      }
+    }
+  }
+
   return {
     describe() {
       return {
@@ -112,6 +130,10 @@ function createClaudeCodeRuntimeAdapter(config) {
       }
       clientsByWorkspace.clear();
       await ipcServer.close();
+    },
+    async startFreshThreadDraft({ workspaceRoot }) {
+      await closeWorkspaceClient(workspaceRoot);
+      return { workspaceRoot };
     },
     async respondApproval({ requestId, decision }) {
       const workspaceRoot = pendingApprovals.get(requestId);
