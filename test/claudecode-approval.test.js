@@ -155,6 +155,48 @@ test("handleRuntimeEvent auto-approves built-in claudecode commands without prom
   assert.deepEqual(resolved, [{ threadId: "thread-1", status: "running" }]);
 });
 
+test("handleNewCommand asks runtime to start a fresh draft before clearing the saved thread", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      startFreshThreadDraft: async ({ workspaceRoot }) => {
+        calls.push(["fresh", workspaceRoot]);
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          clearThreadIdForWorkspace(bindingKey, workspaceRoot) {
+            calls.push(["clear", bindingKey, workspaceRoot]);
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(["send", payload.text]);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleNewCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.deepEqual(calls, [
+    ["fresh", "/workspace"],
+    ["clear", "binding-1", "/workspace"],
+    ["send", "✅ Switched to a fresh thread draft\nworkspace: /workspace"],
+  ]);
+});
+
 test("handleRuntimeEvent auto-approves built-in view_image approvals without prompting", async () => {
   const responses = [];
   const appLike = {

@@ -83,6 +83,9 @@ function createCodexRuntimeAdapter(config) {
       readyState = null;
       client = null;
     },
+    async startFreshThreadDraft() {
+      return {};
+    },
     async respondApproval({ requestId, decision }) {
       const runtimeClient = ensureClient();
       await this.initialize();

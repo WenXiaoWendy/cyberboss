@@ -916,6 +916,9 @@ class CyberbossApp {
       senderId: normalized.senderId,
     });
     const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    if (typeof this.runtimeAdapter.startFreshThreadDraft === "function") {
+      await this.runtimeAdapter.startFreshThreadDraft({ bindingKey, workspaceRoot });
+    }
     this.runtimeAdapter.getSessionStore().clearThreadIdForWorkspace(bindingKey, workspaceRoot);
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
