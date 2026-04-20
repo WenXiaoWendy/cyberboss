@@ -197,6 +197,7 @@ function resolveBoundThread(workspaceRoot) {
   if (!fs.existsSync(sessionFile)) {
     throw new Error(`session file not found: ${sessionFile}`);
   }
+  const runtimeId = normalizeText(process.env.CYBERBOSS_RUNTIME || "codex");
   const data = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
   const currentAccountId = resolveCurrentAccountId();
   const bindings = Object.values(data.bindings || {})
@@ -204,22 +205,22 @@ function resolveBoundThread(workspaceRoot) {
     .sort((left, right) => parseTimestamp(right?.updatedAt) - parseTimestamp(left?.updatedAt));
 
   const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
-  const exact = bindings.find((binding) => getThreadId(binding, normalizedWorkspaceRoot));
+  const exact = bindings.find((binding) => getThreadId(binding, normalizedWorkspaceRoot, runtimeId));
   if (exact) {
     return {
-      threadId: getThreadId(exact, normalizedWorkspaceRoot),
+      threadId: getThreadId(exact, normalizedWorkspaceRoot, runtimeId),
       workspaceRoot: normalizedWorkspaceRoot,
     };
   }
 
   const active = bindings.find((binding) => {
     const activeWorkspaceRoot = normalizeText(binding?.activeWorkspaceRoot);
-    return activeWorkspaceRoot && getThreadId(binding, activeWorkspaceRoot);
+    return activeWorkspaceRoot && getThreadId(binding, activeWorkspaceRoot, runtimeId);
   });
   if (active) {
     const activeWorkspaceRoot = normalizeText(active.activeWorkspaceRoot);
     return {
-      threadId: getThreadId(active, activeWorkspaceRoot),
+      threadId: getThreadId(active, activeWorkspaceRoot, runtimeId),
       workspaceRoot: activeWorkspaceRoot,
     };
   }
@@ -227,14 +228,21 @@ function resolveBoundThread(workspaceRoot) {
   throw new Error(`no bound WeChat thread found for workspace: ${workspaceRoot}`);
 }
 
-function getThreadId(binding, workspaceRoot) {
+function getThreadId(binding, workspaceRoot, runtimeId = "") {
   if (!workspaceRoot) {
     return "";
   }
-  const map = binding && typeof binding.threadIdByWorkspaceRoot === "object"
-    ? binding.threadIdByWorkspaceRoot
-    : {};
+  const map = getThreadMapForRuntime(binding, runtimeId);
   return normalizeText(map[workspaceRoot]);
+}
+
+function getThreadMapForRuntime(binding, runtimeId) {
+  const normalizedRuntimeId = normalizeText(runtimeId);
+  const runtimeMap = binding && typeof binding.threadIdByWorkspaceRootByRuntime === "object"
+    ? binding.threadIdByWorkspaceRootByRuntime
+    : {};
+  const scoped = runtimeMap[normalizedRuntimeId];
+  return scoped && typeof scoped === "object" ? scoped : {};
 }
 
 function parseTimestamp(value) {

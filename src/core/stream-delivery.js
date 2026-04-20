@@ -70,6 +70,36 @@ class StreamDelivery {
     this.deferredReplyPrefixByBindingKey.set(normalizedBindingKey, normalizedText);
   }
 
+  resolveReplyTargetForRun({ threadId = "", turnId = "" } = {}) {
+    const normalizedThreadId = normalizeText(threadId);
+    const normalizedTurnId = normalizeText(turnId);
+    if (!normalizedThreadId) {
+      return null;
+    }
+
+    const runKey = buildRunKey(normalizedThreadId, normalizedTurnId);
+    const state = this.stateByRunKey.get(runKey);
+    if (state?.replyTarget) {
+      return normalizeReplyTarget(state.replyTarget);
+    }
+
+    const exactTurnTarget = this.replyTargetByTurnKey.get(runKey);
+    if (exactTurnTarget) {
+      return normalizeReplyTarget(exactTurnTarget);
+    }
+
+    const queuedTargets = this.replyTargetQueueByThreadId.get(normalizedThreadId);
+    if (Array.isArray(queuedTargets) && queuedTargets.length > 0) {
+      return normalizeReplyTarget(queuedTargets[0]);
+    }
+
+    const linked = this.sessionStore.findBindingForThreadId(normalizedThreadId);
+    if (!linked?.bindingKey) {
+      return null;
+    }
+    return normalizeReplyTarget(this.replyTargetByBindingKey.get(linked.bindingKey));
+  }
+
   async handleRuntimeEvent(event) {
     const threadId = normalizeText(event?.payload?.threadId);
     const turnId = normalizeText(event?.payload?.turnId);

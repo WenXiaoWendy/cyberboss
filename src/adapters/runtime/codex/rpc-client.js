@@ -146,6 +146,14 @@ class CodexRpcClient {
     return this.sendRequest("thread/resume", { threadId: normalizedThreadId });
   }
 
+  async compactThread({ threadId }) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    if (!normalizedThreadId) {
+      throw new Error("thread/compact/start requires a non-empty threadId");
+    }
+    return this.sendRequest("thread/compact/start", { threadId: normalizedThreadId });
+  }
+
   async listThreads({ cursor = null, limit = 100, sortKey = "updated_at" } = {}) {
     return this.sendRequest("thread/list", buildListThreadsParams({
       cursor,

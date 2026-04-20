@@ -146,9 +146,11 @@ CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
 CYBERBOSS_CODEX_COMMAND=
 CYBERBOSS_CLAUDE_COMMAND=claude
 CYBERBOSS_CLAUDE_MODEL=
+CYBERBOSS_CLAUDE_CONTEXT_WINDOW=
 CYBERBOSS_CLAUDE_PERMISSION_MODE=default
 CYBERBOSS_CLAUDE_DISABLE_VERBOSE=false
 CYBERBOSS_CLAUDE_EXTRA_ARGS=
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
@@ -168,16 +170,21 @@ CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
   自定义 Claude 启动命令，默认是 `claude`。
 - `CYBERBOSS_CLAUDE_MODEL`
   设置 Claude 默认模型。
+- `CYBERBOSS_CLAUDE_CONTEXT_WINDOW`
+  设置 Claude 实际上下文窗口，`/status` 里的 `📦 context` 近似值会基于它计算。
 - `CYBERBOSS_CLAUDE_PERMISSION_MODE`
   设置 Claude 权限模式。
 - `CYBERBOSS_CLAUDE_DISABLE_VERBOSE`
   关闭 Claude 终端 verbose 输出。
 - `CYBERBOSS_CLAUDE_EXTRA_ARGS`
   以逗号分隔的形式追加 Claude CLI 参数。
+- `CLAUDE_CODE_MAX_OUTPUT_TOKENS`
+  为 Claude 回复预留输出 token。`/status` 会先从 Claude 上下文窗口里减掉这部分预留量。
 - `CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS`
   设置微信短分片合并阈值默认值。
 - `CYBERBOSS_WEIXIN_BASE_URL`、`CYBERBOSS_WEIXIN_CDN_BASE_URL`、`CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   在特殊部署环境下覆盖微信桥接接口地址和二维码 bot 类型。
+
 
 `CYBERBOSS_ALLOWED_USER_IDS` 支持逗号分隔多个 user id。
 
@@ -223,6 +230,8 @@ CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
   切到新线程草稿
 - `/reread`
   让当前线程重新读取最新 instructions，适合刚改完人格模板或操作模板后使用
+- `/compact`
+  压缩当前线程上下文。桥会先回一条开始提示，完成后再回一条完成提示。
 - `/switch <threadId>`
   切换到指定线程
 - `/stop`

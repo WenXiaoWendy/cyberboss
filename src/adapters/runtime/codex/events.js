@@ -16,8 +16,8 @@ const {
 function mapCodexMessageToRuntimeEvent(message) {
   if (message?.type === "event_msg" && message?.payload?.type === "token_count") {
     return {
-      type: "runtime.usage.updated",
-      payload: normalizeUsagePayload(message.payload),
+      type: "runtime.context.updated",
+      payload: normalizeContextPayload(message),
     };
   }
   const method = normalizeString(message?.method);
@@ -109,25 +109,19 @@ function mapCodexMessageToRuntimeEvent(message) {
   return null;
 }
 
-function normalizeUsagePayload(payload) {
+function normalizeContextPayload(message) {
+  const payload = message?.payload || {};
   const info = payload?.info || {};
   const total = info?.total_token_usage || {};
-  const last = info?.last_token_usage || {};
-  const rateLimits = payload?.rate_limits || {};
   return {
-    totalInputTokens: numberOrZero(total.input_tokens),
-    totalCachedInputTokens: numberOrZero(total.cached_input_tokens),
-    totalOutputTokens: numberOrZero(total.output_tokens),
-    totalReasoningTokens: numberOrZero(total.reasoning_output_tokens),
-    totalTokens: numberOrZero(total.total_tokens),
-    lastInputTokens: numberOrZero(last.input_tokens),
-    lastCachedInputTokens: numberOrZero(last.cached_input_tokens),
-    lastOutputTokens: numberOrZero(last.output_tokens),
-    lastReasoningTokens: numberOrZero(last.reasoning_output_tokens),
-    lastTotalTokens: numberOrZero(last.total_tokens),
-    modelContextWindow: numberOrZero(info?.model_context_window),
-    primaryUsedPercent: numberOrZero(rateLimits?.primary?.used_percent),
-    secondaryUsedPercent: numberOrZero(rateLimits?.secondary?.used_percent),
+    runtimeId: "codex",
+    threadId: normalizeString(payload?.thread_id || info?.thread_id),
+    inputTokens: numberOrZero(total.input_tokens),
+    cachedInputTokens: numberOrZero(total.cached_input_tokens),
+    outputTokens: numberOrZero(total.output_tokens),
+    reasoningTokens: numberOrZero(total.reasoning_output_tokens),
+    currentTokens: numberOrZero(total.total_tokens),
+    contextWindow: numberOrZero(info?.model_context_window),
   };
 }
 

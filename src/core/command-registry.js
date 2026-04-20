@@ -105,6 +105,13 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "thread.compact",
+        summary: "Compact the current thread context",
+        terminal: [],
+        weixin: ["/compact"],
+        status: "active",
+      },
+      {
         action: "thread.switch",
         summary: "Switch to a specific thread",
         terminal: [],
@@ -337,6 +344,7 @@ function actionEmoji(action) {
     case "workspace.status": return "📊";
     case "thread.new": return "🆕";
     case "thread.reread": return "🔄";
+    case "thread.compact": return "🗜️";
     case "thread.switch": return "🔀";
     case "thread.stop": return "⏹️";
     case "system.checkin_range": return "⏰";

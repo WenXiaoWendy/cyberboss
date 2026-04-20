@@ -2,9 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
+const fs = require("node:fs");
 
 const { CyberbossApp } = require("../src/core/app");
 const { mapClaudeCodeMessageToRuntimeEvent } = require("../src/adapters/runtime/claudecode/events");
+const { SessionStore } = require("../src/adapters/runtime/codex/session-store");
 
 test("claudecode approval events extract command tokens from exec_command input", () => {
   const event = mapClaudeCodeMessageToRuntimeEvent({
@@ -109,6 +111,30 @@ test("claudecode approval events capture Write file paths for state-dir auto app
   assert.deepEqual(event.payload.filePaths, ["/Users/tingyiwen/.cyberboss/notes/today.md"]);
 });
 
+test("claudecode assistant events map usage into context snapshots", () => {
+  const event = mapClaudeCodeMessageToRuntimeEvent(
+    {
+      type: "context.updated",
+      sessionId: "thread-1",
+    },
+    {
+      message: {
+        usage: {
+          input_tokens: 7,
+          cache_creation_input_tokens: 12150,
+          cache_read_input_tokens: 13535,
+          output_tokens: 1509,
+        },
+      },
+    },
+  );
+
+  assert.equal(event.type, "runtime.context.updated");
+  assert.equal(event.payload.runtimeId, "claudecode");
+  assert.equal(event.payload.threadId, "thread-1");
+  assert.equal(event.payload.currentTokens, 27201);
+});
+
 test("handleRuntimeEvent auto-approves built-in claudecode commands without prompting", async () => {
   const responses = [];
   const resolved = [];
@@ -197,23 +223,36 @@ test("handleNewCommand asks runtime to start a fresh draft before clearing the s
   ]);
 });
 
-test("handleSwitchCommand passes workspaceRoot so claudecode can switch the live session", async () => {
+test("handleCompactCommand invokes runtime compaction for the current thread", async () => {
   const calls = [];
   const appLike = {
+    pendingOperationByRunKey: new Map(),
     resolveWorkspaceRoot() {
       return "/workspace";
     },
+    streamDelivery: {
+      queueReplyTargetForThread(threadId, payload) {
+        calls.push(["queue", threadId, payload.userId, payload.contextToken, payload.provider]);
+      },
+    },
+    scheduleRuntimeEventWatchdog(payload) {
+      calls.push(["watchdog", payload.threadId, payload.workspaceRoot]);
+    },
     runtimeAdapter: {
-      async resumeThread(payload) {
-        calls.push(["resume", payload]);
+      async compactThread(payload) {
+        calls.push(["compact", payload.threadId, payload.workspaceRoot, payload.model]);
+        return { threadId: payload.threadId, turnId: "turn-1" };
       },
       getSessionStore() {
         return {
           buildBindingKey() {
             return "binding-1";
           },
-          setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId) {
-            calls.push(["set", bindingKey, workspaceRoot, threadId]);
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "claude-sonnet" };
           },
         };
       },
@@ -225,22 +264,213 @@ test("handleSwitchCommand passes workspaceRoot so claudecode can switch the live
     },
   };
 
-  await CyberbossApp.prototype.handleSwitchCommand.call(appLike, {
+  await CyberbossApp.prototype.handleCompactCommand.call(appLike, {
     workspaceId: "default",
     accountId: "account-1",
     senderId: "user-1",
     contextToken: "ctx-1",
-  }, {
-    args: "thread-2",
+    provider: "weixin",
   });
 
   assert.deepEqual(calls, [
-    ["resume", { threadId: "thread-2", workspaceRoot: "/workspace" }],
-    ["set", "binding-1", "/workspace", "thread-2"],
-    ["send", "✅ Thread switched\nworkspace: /workspace\nthread: thread-2"],
+    ["queue", "thread-1", "user-1", "ctx-1", "weixin"],
+    ["watchdog", "thread-1", "/workspace"],
+    ["compact", "thread-1", "/workspace", "claude-sonnet"],
+    ["send", "🗜️ Compact request sent\nthread: thread-1"],
+  ]);
+  assert.equal(appLike.pendingOperationByRunKey.get("thread-1:turn-1")?.kind, "compact");
+});
+
+test("handleCompactCommand reports when there is no active thread", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "";
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleCompactCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.deepEqual(calls, [
+    "💡 There is no active thread yet. Send a normal message first.",
   ]);
 });
 
+test("handleStopCommand passes workspaceRoot through to runtime cancellation", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    threadStateStore: {
+      getThreadState(threadId) {
+        calls.push(["state", threadId]);
+        return {
+          threadId,
+          turnId: "turn-1",
+          status: "running",
+        };
+      },
+    },
+    runtimeAdapter: {
+      async cancelTurn(payload) {
+        calls.push(["cancel", payload.threadId, payload.turnId, payload.workspaceRoot]);
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(["send", payload.text]);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStopCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.deepEqual(calls, [
+    ["state", "thread-1"],
+    ["cancel", "thread-1", "turn-1", "/workspace"],
+    ["send", "⏹️ Stop request sent\nthread: thread-1"],
+  ]);
+});
+
+test("handleStopCommand allows stopping while waiting for approval", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    threadStateStore: {
+      getThreadState() {
+        return {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          status: "waiting_approval",
+        };
+      },
+    },
+    runtimeAdapter: {
+      async cancelTurn(payload) {
+        calls.push(payload);
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStopCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.equal(calls[0].workspaceRoot, "/workspace");
+  assert.equal(calls[1], "⏹️ Stop request sent\nthread: thread-1");
+});
+
+test("handleRuntimeEvent reports compact completion back to WeChat", async () => {
+  const sent = [];
+  const appLike = {
+    pendingOperationByRunKey: new Map([
+      ["thread-1:turn-1", {
+        kind: "compact",
+        userId: "user-1",
+        contextToken: "ctx-1",
+      }],
+    ]),
+    streamDelivery: {
+      async handleRuntimeEvent() {},
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          clearApprovalPrompt() {},
+          findBindingForThreadId() {
+            return null;
+          },
+        };
+      },
+    },
+    turnGateStore: {
+      releaseThread() {},
+      isPending() {
+        return false;
+      },
+    },
+    hasPendingInboundMessage() {
+      return false;
+    },
+    async flushPendingInboundMessages() {},
+    async flushPendingSystemMessages() {},
+    async stopTypingForThread() {},
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleRuntimeEvent.call(appLike, {
+    type: "runtime.turn.completed",
+    payload: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+    },
+  });
+
+  assert.deepEqual(sent, ["✅ Compact finished\nthread: thread-1"]);
+  assert.equal(appLike.pendingOperationByRunKey.size, 0);
+});
 test("handleRuntimeEvent auto-approves built-in view_image approvals without prompting", async () => {
   const responses = [];
   const appLike = {
@@ -469,4 +699,435 @@ test("handleRuntimeEvent auto-approves allowlisted prefixes for claudecode appro
   });
 
   assert.deepEqual(responses, [{ requestId: "req-4", decision: "accept" }]);
+});
+
+test("handleSwitchCommand stores the actual claudecode thread returned by runtime", async () => {
+  const calls = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "claudecode" };
+      },
+      async resumeThread({ threadId, workspaceRoot }) {
+        calls.push(["resume", threadId, workspaceRoot]);
+        return { threadId: "actual-thread" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId) {
+            calls.push(["set", bindingKey, workspaceRoot, threadId]);
+          },
+          setPendingThreadIdForWorkspace(bindingKey, workspaceRoot, threadId) {
+            calls.push(["pending", bindingKey, workspaceRoot, threadId]);
+          },
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        calls.push(["send", payload.text]);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleSwitchCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  }, {
+    args: "target-thread",
+  });
+
+  assert.deepEqual(calls, [
+    ["resume", "target-thread", "/workspace"],
+    ["set", "binding-1", "/workspace", "actual-thread"],
+    ["pending", "binding-1", "/workspace", "actual-thread"],
+    ["send", "🔁 Thread switch requested\nworkspace: /workspace\ntarget: actual-thread\nIt will be verified on the next normal message."],
+  ]);
+});
+
+test("session store does not reuse legacy thread ids across runtimes", () => {
+  const sessionsFile = path.join(
+    os.tmpdir(),
+    `cyberboss-session-store-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+  );
+  fs.writeFileSync(sessionsFile, JSON.stringify({
+    bindings: {
+      "binding-1": {
+        activeWorkspaceRoot: "/workspace",
+        threadIdByWorkspaceRoot: {
+          "/workspace": "codex-thread",
+        },
+      },
+    },
+  }, null, 2));
+
+  const claudecodeStore = new SessionStore({ filePath: sessionsFile, runtimeId: "claudecode" });
+  const codexStore = new SessionStore({ filePath: sessionsFile, runtimeId: "codex" });
+
+  assert.equal(claudecodeStore.getThreadIdForWorkspace("binding-1", "/workspace"), "");
+  assert.equal(codexStore.getThreadIdForWorkspace("binding-1", "/workspace"), "");
+});
+
+test("codex session store reads runtime-scoped thread ids", () => {
+  const sessionsFile = path.join(
+    os.tmpdir(),
+    `cyberboss-codex-runtime-scoped-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+  );
+  fs.writeFileSync(sessionsFile, JSON.stringify({
+    bindings: {
+      "binding-1": {
+        activeWorkspaceRoot: "/workspace",
+        threadIdByWorkspaceRootByRuntime: {
+          codex: {
+            "/workspace": "codex-thread",
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const codexStore = new SessionStore({ filePath: sessionsFile, runtimeId: "codex" });
+
+  assert.equal(codexStore.getThreadIdForWorkspace("binding-1", "/workspace"), "codex-thread");
+  assert.deepEqual(codexStore.listWorkspaceRoots("binding-1"), ["/workspace"]);
+  assert.deepEqual(codexStore.findBindingForThreadId("codex-thread"), {
+    bindingKey: "binding-1",
+    workspaceRoot: "/workspace",
+  });
+});
+
+test("codex session store does not reuse legacy thread ids without runtime-scoped binding", () => {
+  const sessionsFile = path.join(
+    os.tmpdir(),
+    `cyberboss-codex-thread-store-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+  );
+  fs.writeFileSync(sessionsFile, JSON.stringify({
+    bindings: {
+      "binding-1": {
+        activeWorkspaceRoot: "/workspace",
+        threadIdByWorkspaceRoot: {
+          "/workspace": "legacy-codex-thread",
+        },
+      },
+    },
+  }, null, 2));
+
+  const codexStore = new SessionStore({ filePath: sessionsFile, runtimeId: "codex" });
+
+  assert.equal(codexStore.getThreadIdForWorkspace("binding-1", "/workspace"), "");
+  assert.deepEqual(codexStore.listWorkspaceRoots("binding-1"), []);
+  assert.equal(codexStore.findBindingForThreadId("legacy-codex-thread"), null);
+});
+
+test("claudecode session store keeps pending thread targets runtime-scoped", () => {
+  const sessionsFile = path.join(
+    os.tmpdir(),
+    `cyberboss-pending-thread-store-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+  );
+  const claudecodeStore = new SessionStore({ filePath: sessionsFile, runtimeId: "claudecode" });
+  claudecodeStore.setPendingThreadIdForWorkspace("binding-1", "/workspace", "claude-target");
+  const codexStore = new SessionStore({ filePath: sessionsFile, runtimeId: "codex" });
+
+  assert.equal(claudecodeStore.getPendingThreadIdForWorkspace("binding-1", "/workspace"), "claude-target");
+  assert.equal(codexStore.getPendingThreadIdForWorkspace("binding-1", "/workspace"), "");
+});
+
+test("handleStatusCommand asks to configure claudecode context window before showing context", async () => {
+  const sent = [];
+  const appLike = {
+    config: {
+      claudeModel: "claude-sonnet",
+    },
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "claudecode" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getPendingThreadIdForWorkspace() {
+            return "";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "" };
+          },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() {
+        return { status: "idle" };
+      },
+      getLatestContext() {
+        return {
+          runtimeId: "claudecode",
+          currentTokens: 18000,
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStatusCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.match(sent[0], /📦 context: set CYBERBOSS_CLAUDE_CONTEXT_WINDOW/);
+});
+
+test("handleStatusCommand shows approximate context details for claudecode when configured", async () => {
+  const sent = [];
+  const appLike = {
+    config: {
+      claudeContextWindow: 130000,
+      claudeMaxOutputTokens: 64000,
+    },
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "claudecode" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getPendingThreadIdForWorkspace() {
+            return "";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "kimi-for-coding" };
+          },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() {
+        return {
+          status: "idle",
+          context: {
+            runtimeId: "claudecode",
+            currentTokens: 18000,
+          },
+        };
+      },
+      getLatestContext() {
+        return null;
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStatusCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.match(sent[0], /📦 context: approx 18k\/66k \| 73% left \| reserve 64k/);
+});
+
+test("handleStatusCommand asks to reduce claudecode max output tokens when reserve exceeds window", async () => {
+  const sent = [];
+  const appLike = {
+    config: {
+      claudeContextWindow: 130000,
+      claudeMaxOutputTokens: 140000,
+    },
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "claudecode" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getPendingThreadIdForWorkspace() {
+            return "";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "kimi-for-coding" };
+          },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() {
+        return {
+          status: "idle",
+          context: {
+            runtimeId: "claudecode",
+            currentTokens: 18000,
+          },
+        };
+      },
+      getLatestContext() {
+        return null;
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStatusCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.match(sent[0], /📦 context: reduce CLAUDE_CODE_MAX_OUTPUT_TOKENS/);
+});
+
+test("handleStatusCommand shows codex context details", async () => {
+  const sent = [];
+  const appLike = {
+    config: {},
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getPendingThreadIdForWorkspace() {
+            return "";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "gpt-5.4" };
+          },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() {
+        return { status: "idle" };
+      },
+      getLatestContext() {
+        return {
+          runtimeId: "codex",
+          currentTokens: 1234,
+          contextWindow: 200000,
+        };
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStatusCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.match(sent[0], /📦 context: 1.2k\/200k \| 99% left/);
+});
+
+test("handleStatusCommand shows codex context as unavailable when no context data is available", async () => {
+  const sent = [];
+  const appLike = {
+    config: {},
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+          getThreadIdForWorkspace() {
+            return "thread-1";
+          },
+          getPendingThreadIdForWorkspace() {
+            return "";
+          },
+          getRuntimeParamsForWorkspace() {
+            return { model: "gpt-5.4" };
+          },
+        };
+      },
+    },
+    threadStateStore: {
+      getThreadState() {
+        return { status: "idle" };
+      },
+      getLatestContext() {
+        return null;
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handleStatusCommand.call(appLike, {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  });
+
+  assert.match(sent[0], /📦 context: unavailable/);
 });

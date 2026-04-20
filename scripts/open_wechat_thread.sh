@@ -7,6 +7,7 @@ STATE_DIR="${CYBERBOSS_STATE_DIR:-$HOME/.cyberboss}"
 SESSION_FILE="${CYBERBOSS_SESSIONS_FILE:-${STATE_DIR}/sessions.json}"
 WORKSPACE_ROOT="${CYBERBOSS_WORKSPACE_ROOT:-$PWD}"
 ACCOUNT_DIR="${STATE_DIR}/accounts"
+RUNTIME_ID="${CYBERBOSS_RUNTIME:-codex}"
 
 if [[ ! -f "${SESSION_FILE}" ]]; then
   echo "session file not found: ${SESSION_FILE}" >&2
@@ -21,6 +22,7 @@ RESOLVED="$(
     const sessionFile = process.argv[1];
     const workspaceRoot = process.argv[2];
     const accountDir = process.argv[3];
+    const runtimeId = process.argv[4];
     const data = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
     const bindings = Object.entries(data.bindings || {}).map(([bindingKey, binding]) => ({ bindingKey, ...(binding || {}) }));
 
@@ -60,14 +62,21 @@ RESOLVED="$(
       return entries[0]?.accountId || "";
     }
 
+    function getThreadMapForRuntime(binding, runtimeId) {
+      const normalizedRuntimeId = normalize(runtimeId);
+      const runtimeMap = binding && typeof binding.threadIdByWorkspaceRootByRuntime === "object"
+        ? binding.threadIdByWorkspaceRootByRuntime
+        : {};
+      const scoped = runtimeMap[normalizedRuntimeId];
+      return scoped && typeof scoped === "object" ? scoped : {};
+    }
+
     function getThreadId(binding, root) {
       const normalizedRoot = normalize(root);
       if (!normalizedRoot) {
         return "";
       }
-      const map = binding && typeof binding.threadIdByWorkspaceRoot === "object"
-        ? binding.threadIdByWorkspaceRoot
-        : {};
+      const map = getThreadMapForRuntime(binding, runtimeId);
       return normalize(map[normalizedRoot]);
     }
 
@@ -95,7 +104,7 @@ RESOLVED="$(
     }
 
     process.exit(1);
-  ' "${SESSION_FILE}" "${WORKSPACE_ROOT}" "${ACCOUNT_DIR}"
+  ' "${SESSION_FILE}" "${WORKSPACE_ROOT}" "${ACCOUNT_DIR}" "${RUNTIME_ID}"
 )"
 
 if [[ -z "${RESOLVED}" ]]; then

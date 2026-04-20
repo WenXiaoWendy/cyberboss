@@ -141,9 +141,11 @@ CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
 CYBERBOSS_CODEX_COMMAND=
 CYBERBOSS_CLAUDE_COMMAND=claude
 CYBERBOSS_CLAUDE_MODEL=
+CYBERBOSS_CLAUDE_CONTEXT_WINDOW=
 CYBERBOSS_CLAUDE_PERMISSION_MODE=default
 CYBERBOSS_CLAUDE_DISABLE_VERBOSE=false
 CYBERBOSS_CLAUDE_EXTRA_ARGS=
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
@@ -163,12 +165,16 @@ What these do:
   Override the Claude launcher. Default is `claude`.
 - `CYBERBOSS_CLAUDE_MODEL`
   Set the default Claude model.
+- `CYBERBOSS_CLAUDE_CONTEXT_WINDOW`
+  Set Claude's effective context window so `/status` can show an approximate context usage line.
 - `CYBERBOSS_CLAUDE_PERMISSION_MODE`
   Set Claude's permission mode before the bridge starts.
 - `CYBERBOSS_CLAUDE_DISABLE_VERBOSE`
   Disable verbose Claude terminal output.
 - `CYBERBOSS_CLAUDE_EXTRA_ARGS`
   Append extra Claude CLI arguments as a comma-separated list.
+- `CLAUDE_CODE_MAX_OUTPUT_TOKENS`
+  Reserve output tokens for Claude replies. `/status` subtracts this reserve from the configured Claude context window.
 - `CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS`
   Set the default minimum merge size for short WeChat reply chunks.
 - `CYBERBOSS_WEIXIN_BASE_URL`, `CYBERBOSS_WEIXIN_CDN_BASE_URL`, `CYBERBOSS_WEIXIN_QR_BOT_TYPE`
@@ -216,6 +222,8 @@ Switch the runtime with `CYBERBOSS_RUNTIME`. You do not need a different command
   Move to a new thread draft
 - `/reread`
   Reload the latest persona template and operations template into the current thread
+- `/compact`
+  Ask the current thread to compact its context. The bridge sends a start message and a completion message back to WeChat.
 - `/switch <threadId>`
   Switch to a specific thread
 - `/stop`

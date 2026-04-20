@@ -17,8 +17,10 @@ class ClaudeCodeProcessClient {
     this.listeners = new Set();
     this.pendingTurnId = "";
     this.sessionId = "";
+    this.resumeSessionId = "";
     this.activeThreadId = "";
     this.alive = false;
+    this.sessionWaiters = new Set();
   }
 
   onMessage(listener) {
@@ -41,6 +43,9 @@ class ClaudeCodeProcessClient {
 
   async connect(resumeSessionId = "") {
     if (this.child) return;
+    this.sessionId = "";
+    this.resumeSessionId = isValidSessionId(resumeSessionId) ? resumeSessionId : "";
+    this.activeThreadId = "";
     const args = buildArgs({
       model: this.model,
       permissionMode: this.permissionMode,
@@ -78,6 +83,7 @@ class ClaudeCodeProcessClient {
     });
 
     child.on("error", (err) => {
+      this.rejectSessionWaiters(err);
       this.alive = false;
       this.child = null;
       this.stdin = null;
@@ -85,6 +91,7 @@ class ClaudeCodeProcessClient {
     });
 
     child.on("close", (code) => {
+      this.rejectSessionWaiters(new Error(`claudecode process closed with code ${code ?? "unknown"}`));
       this.alive = false;
       this.child = null;
       this.stdin = null;
@@ -104,7 +111,12 @@ class ClaudeCodeProcessClient {
     switch (eventType) {
       case "system":
         if (raw.session_id) {
+          if (isPendingThreadId(this.activeThreadId)) {
+            this.activeThreadId = raw.session_id;
+          }
           this.sessionId = raw.session_id;
+          this.resumeSessionId = "";
+          this.resolveSessionWaiters(raw.session_id);
           this.emit({ type: "session.id", sessionId: raw.session_id }, raw);
         }
         break;
@@ -126,6 +138,15 @@ class ClaudeCodeProcessClient {
   }
 
   handleAssistant(raw) {
+    const usage = raw?.message?.usage;
+    if (usage && typeof usage === "object") {
+      this.emit({
+        type: "context.updated",
+        usage,
+        turnId: this.pendingTurnId,
+        sessionId: this.activeThreadId || this.sessionId,
+      }, raw);
+    }
     const content = raw?.message?.content;
     if (!Array.isArray(content)) return;
     for (const item of content) {
@@ -181,6 +202,7 @@ class ClaudeCodeProcessClient {
   handleResult(raw) {
     if (raw.session_id) {
       this.sessionId = raw.session_id;
+      this.resumeSessionId = "";
     }
     this.emit({
       type: "turn.completed",
@@ -249,6 +271,24 @@ class ClaudeCodeProcessClient {
     this.stdin.write(payload + "\n");
   }
 
+  async waitForSessionId({ timeoutMs = 5000 } = {}) {
+    if (this.sessionId) {
+      return this.sessionId;
+    }
+    if (!this.alive) {
+      throw new Error("claudecode process not running");
+    }
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000;
+    return await new Promise((resolve, reject) => {
+      const entry = { resolve, reject, timer: null };
+      entry.timer = setTimeout(() => {
+        this.sessionWaiters.delete(entry);
+        reject(new Error("timed out waiting for claudecode session id"));
+      }, timeout);
+      this.sessionWaiters.add(entry);
+    });
+  }
+
   async close() {
     if (!this.child) return;
     if (this.stdin && !this.stdin.destroyed) {
@@ -277,6 +317,33 @@ class ClaudeCodeProcessClient {
     this.alive = false;
     this.child = null;
     this.stdin = null;
+    this.sessionId = "";
+    this.resumeSessionId = "";
+    this.activeThreadId = "";
+    this.pendingTurnId = "";
+    this.rejectSessionWaiters(new Error("claudecode process closed"));
+  }
+
+  resolveSessionWaiters(sessionId) {
+    if (!this.sessionWaiters.size) {
+      return;
+    }
+    for (const entry of this.sessionWaiters) {
+      clearTimeout(entry.timer);
+      entry.resolve(sessionId);
+    }
+    this.sessionWaiters.clear();
+  }
+
+  rejectSessionWaiters(error) {
+    if (!this.sessionWaiters.size) {
+      return;
+    }
+    for (const entry of this.sessionWaiters) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+    }
+    this.sessionWaiters.clear();
   }
 }
 
@@ -319,3 +386,7 @@ function isPotentiallySensitive(text) {
 }
 
 module.exports = { ClaudeCodeProcessClient };
+
+function isPendingThreadId(threadId) {
+  return /^pending-\d+$/u.test(String(threadId || "").trim());
+}

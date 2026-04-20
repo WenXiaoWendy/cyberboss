@@ -433,6 +433,74 @@ test("completed turns flush queued inbound work before system messages", async (
   assert.deepEqual(calls, ["releaseThread", "flushInbound", "flushSystem", "stopTyping"]);
 });
 
+test("failed turns still send error back when thread binding lookup is missing", async () => {
+  const sent = [];
+  const appLike = {
+    streamDelivery: {
+      resolveReplyTargetForRun() {
+        return {
+          userId: "user-1",
+          contextToken: "ctx-1",
+          provider: "weixin",
+        };
+      },
+      async handleRuntimeEvent() {},
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          clearApprovalPrompt() {},
+          findBindingForThreadId() {
+            return null;
+          },
+          getBinding() {
+            return null;
+          },
+        };
+      },
+    },
+    turnGateStore: {
+      releaseThread() {},
+      isPending() {
+        return false;
+      },
+    },
+    turnBoundaryScopeKeys: new Set(),
+    hasPendingInboundMessage() {
+      return false;
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload);
+      },
+    },
+    async sendFailureToThread(threadId, text, fallbackTarget) {
+      return CyberbossApp.prototype.sendFailureToThread.call(this, threadId, text, fallbackTarget);
+    },
+    async stopTypingForThread() {},
+    async flushPendingInboundMessages() {},
+    async flushPendingSystemMessages() {},
+    resolveReplyTargetForBinding() {
+      return null;
+    },
+  };
+
+  await CyberbossApp.prototype.handleRuntimeEvent.call(appLike, {
+    type: "runtime.turn.failed",
+    payload: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      text: "❌ Execution failed\ncontext window exceeded",
+    },
+  });
+
+  assert.deepEqual(sent, [{
+    userId: "user-1",
+    text: "❌ Execution failed\ncontext window exceeded",
+    contextToken: "ctx-1",
+  }]);
+});
+
 test("flushPendingInboundMessages batches queued messages from the same scope into one turn", async () => {
   const dispatched = [];
   const scopeKey = "binding-1::/workspace";

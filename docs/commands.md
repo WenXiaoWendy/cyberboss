@@ -32,6 +32,7 @@ The runtime can be `codex` or `claudecode`, but the documented command surface s
 - `workspace.status`
 - `thread.new`
 - `thread.reread`
+- `thread.compact`
 - `thread.switch`
 - `thread.stop`
 - `system.checkin_range`
@@ -124,6 +125,7 @@ All `reminder / diary / system / timeline` commands listed here are already usab
 - `/status`
 - `/new`
 - `/reread`
+- `/compact`
 - `/stop`
 - `/switch <threadId>`
 - `/checkin <min>-<max>`
@@ -139,4 +141,6 @@ All `reminder / diary / system / timeline` commands listed here are already usab
 Notes:
 
 - `/status` now covers what used to be split between `where` and `usage`
+- there is currently no separate `/context` command; use `/status` and read the `📦 context` line
+- `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command

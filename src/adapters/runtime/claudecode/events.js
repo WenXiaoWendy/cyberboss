@@ -8,6 +8,11 @@ const {
 function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
   const type = message?.type;
   switch (type) {
+    case "context.updated":
+      return {
+        type: "runtime.context.updated",
+        payload: normalizeClaudeContextPayload(message, raw),
+      };
     case "turn.started":
       return {
         type: "runtime.turn.started",
@@ -97,6 +102,33 @@ function truncateCommand(text, maxLines = 6, maxLineLength = 100) {
     return result + "\n…";
   }
   return result;
+}
+
+function normalizeClaudeContextPayload(message, raw) {
+  const usage = raw?.message?.usage && typeof raw.message.usage === "object"
+    ? raw.message.usage
+    : (message?.usage && typeof message.usage === "object" ? message.usage : {});
+  const inputTokens = numberOrZero(usage.input_tokens);
+  const cacheCreationInputTokens = numberOrZero(usage.cache_creation_input_tokens);
+  const cacheReadInputTokens = numberOrZero(usage.cache_read_input_tokens);
+  const outputTokens = numberOrZero(usage.output_tokens);
+  return {
+    runtimeId: "claudecode",
+    threadId: normalizeString(message?.sessionId),
+    inputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
+    outputTokens,
+    currentTokens: inputTokens + cacheCreationInputTokens + cacheReadInputTokens + outputTokens,
+  };
+}
+
+function normalizeString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberOrZero(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
 module.exports = { mapClaudeCodeMessageToRuntimeEvent };

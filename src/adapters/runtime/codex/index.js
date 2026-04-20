@@ -13,7 +13,7 @@ const {
 const { SessionStore } = require("./session-store");
 
 function createCodexRuntimeAdapter(config) {
-  const sessionStore = new SessionStore({ filePath: config.sessionsFile });
+  const sessionStore = new SessionStore({ filePath: config.sessionsFile, runtimeId: "codex" });
   let client = null;
   let readyState = null;
 
@@ -109,6 +109,11 @@ function createCodexRuntimeAdapter(config) {
       const runtimeClient = ensureClient();
       await this.initialize();
       return runtimeClient.resumeThread({ threadId });
+    },
+    async compactThread({ threadId }) {
+      const runtimeClient = ensureClient();
+      await this.initialize();
+      return runtimeClient.compactThread({ threadId });
     },
     async refreshThreadInstructions({ threadId, workspaceRoot, model = "" }) {
       const runtimeClient = ensureClient();

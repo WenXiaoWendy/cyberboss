@@ -138,10 +138,18 @@ function collectWorkspaceRoots(binding) {
   if (activeWorkspaceRoot) {
     workspaceRoots.add(activeWorkspaceRoot);
   }
-  for (const workspaceRoot of Object.keys(binding?.threadIdByWorkspaceRoot || {})) {
-    const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
-    if (normalizedWorkspaceRoot) {
-      workspaceRoots.add(normalizedWorkspaceRoot);
+  const runtimeThreadMap = binding?.threadIdByWorkspaceRootByRuntime && typeof binding.threadIdByWorkspaceRootByRuntime === "object"
+    ? binding.threadIdByWorkspaceRootByRuntime
+    : {};
+  for (const scopedMap of Object.values(runtimeThreadMap)) {
+    if (!scopedMap || typeof scopedMap !== "object") {
+      continue;
+    }
+    for (const workspaceRoot of Object.keys(scopedMap)) {
+      const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
+      if (normalizedWorkspaceRoot) {
+        workspaceRoots.add(normalizedWorkspaceRoot);
+      }
     }
   }
   for (const workspaceRoot of Object.keys(binding?.codexParamsByWorkspaceRoot || {})) {
