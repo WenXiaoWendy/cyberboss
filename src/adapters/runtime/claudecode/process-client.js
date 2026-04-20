@@ -53,11 +53,12 @@ class ClaudeCodeProcessClient {
       extraArgs: this.extraArgs,
       resumeSessionId,
     });
+    const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(this.command);
     const child = spawn(this.command, args, {
       cwd: this.cwd,
       env: this.env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
+      shell: useShell || false,
     });
     this.child = child;
     this.stdin = child.stdin;
