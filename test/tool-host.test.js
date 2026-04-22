@@ -102,7 +102,7 @@ function createHost() {
             stayCount: 2,
             moveCount: 1,
             mobilityState: { state: "staying" },
-            knownPlaces: [{ placeId: "home", durationText: "2h" }],
+            knownPlaces: [{ placeTag: "home", durationText: "2h" }],
             batteryTrend: { sampleCount: 2, deltaPercent: -45 },
           };
         },
