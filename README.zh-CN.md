@@ -197,6 +197,8 @@ CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
 
 如果你要跑共享线程，建议也在第一次启动前就把 `CYBERBOSS_WORKSPACE_ROOT` 配好。这样 `shared:open` 会优先接到你当前项目对应的那条线程，而不是回退到别的历史绑定。
 
+当 `CYBERBOSS_RUNTIME=claudecode` 时，Cyberboss 会在当前工作区自动补写 `.mcp.json` 里的 `cyberboss_tools`，并在启动 Claude 时显式挂上这份 MCP 配置。Claude 能发现 Cyberboss project tools，靠的就是这条项目本地配置，而不是全局注册。
+
 ### 用户自己会用到的终端命令
 
 - `npm run login`
@@ -335,43 +337,25 @@ ${HOME}/.cyberboss
 <a id="agent-guide"></a>
 ## Agent 接入
 
-下面这些命令主要是给 agent / 自动化能力使用的，不是普通用户每天手敲的主入口。无论底层 runtime 是 Codex 还是 Claude Code，本地命令入口都保持一致。
+给 agent 暴露的 Cyberboss 能力是项目内结构化工具。
 
-### Agent 常用命令
+### 常用项目工具
 
-- `cyberboss reminder write --delay 30m --text "提醒内容"`
-  给未来的自己留 reminder
-- `cyberboss reminder write --delay 20m --text-file /绝对路径/reminder.txt`
-  适合长文本或包含引号的内容
-- `cyberboss reminder write --at "2026-04-07 21:30" --text "提醒内容"`
-  写明确时间点 reminder
-- `cyberboss diary write --title 标题 --text "内容"`
-  写本地日记
-- `cyberboss diary write --date 2026-04-06 --title "4.6" --text-file /绝对路径/entry.md`
-  写指定日期日记
-- `cyberboss timeline write --date YYYY-MM-DD --events-file /绝对路径/events.json`
-  增量写入时间轴
-- `cyberboss timeline build`
-  构建时间轴静态页面
-- `cyberboss timeline serve`
-  启动时间轴静态页面服务
-- `cyberboss timeline dev`
-  启动时间轴热更新开发服务
-- `cyberboss timeline screenshot --send`
-  稳定截图入口，会把截图任务交给当前微信桥执行
-- `cyberboss channel send-file --path /绝对路径`
-  把本地已有文件直接发回当前微信聊天
-- `cyberboss system send --text "系统消息"`
-  向内部系统队列写入一条不可见触发消息
-- `cyberboss system checkin-poller`
-  底层随机轮询入口，通常只用于调试；正常用户直接用共享模式
+- `cyberboss_reminder_create`
+- `cyberboss_diary_append`
+- `cyberboss_timeline_write`
+- `cyberboss_timeline_build`
+- `cyberboss_timeline_serve`
+- `cyberboss_timeline_dev`
+- `cyberboss_timeline_screenshot`
+- `cyberboss_channel_send_file`
+- `cyberboss_system_send`
 
 ### Agent 使用约定
 
-- 优先使用 `README`、`--help` 和 [docs/commands.md](./docs/commands.md) 里已经暴露的稳定入口
-- 参数不清楚时先看 `--help`
+- diary、reminder、timeline、screenshot、file-send 这类 Cyberboss 能力使用项目工具
+- 终端给人手动使用的仍然是 `README`、`--help` 和 [docs/commands.md](./docs/commands.md) 中的生命周期入口
 - 第一次执行失败时，先反馈报错，不要立刻读源码
-- 如果只是发文件或截图回微信，优先用现成命令，不要去找内部 `channelAdapter.sendFile(...)`
 
 ## 文档入口
 

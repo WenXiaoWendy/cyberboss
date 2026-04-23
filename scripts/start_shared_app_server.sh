@@ -1,12 +1,14 @@
 #!/bin/zsh
 set -euo pipefail
 
+ROOT_DIR="${0:A:h:h}"
 PORT="${CYBERBOSS_SHARED_PORT:-8765}"
 LISTEN_URL="ws://127.0.0.1:${PORT}"
 STATE_DIR="${CYBERBOSS_STATE_DIR:-$HOME/.cyberboss}"
 LOG_DIR="${STATE_DIR}/logs"
 PID_FILE="${LOG_DIR}/shared-app-server.pid"
 LOG_FILE="${LOG_DIR}/shared-app-server.log"
+CODEX_COMMAND="${CYBERBOSS_CODEX_COMMAND:-codex}"
 
 function lookup_listen_pid() {
   lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null \
@@ -19,6 +21,26 @@ export TIMELINE_FOR_AGENT_STATE_DIR="${STATE_DIR}"
 if [[ -z "${TIMELINE_FOR_AGENT_CHROME_PATH:-}" ]]; then
   export TIMELINE_FOR_AGENT_CHROME_PATH="${CYBERBOSS_SCREENSHOT_CHROME_PATH:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 fi
+export CYBERBOSS_HOME="${CYBERBOSS_HOME:-${ROOT_DIR}}"
+
+MCP_CONFIG_ARGS=()
+while IFS= read -r line; do
+  if [[ -n "${line}" ]]; then
+    MCP_CONFIG_ARGS+=("${line}")
+  fi
+done < <(
+  node -e '
+    const helper = require(process.argv[1]);
+    const args = helper.buildCodexMcpConfigArgs(
+      helper.resolveCodexProjectToolMcpServerConfig({
+        cyberbossHome: process.env.CYBERBOSS_HOME || process.argv[2],
+      })
+    );
+    for (const arg of args) {
+      process.stdout.write(`${arg}\n`);
+    }
+  ' "${ROOT_DIR}/src/adapters/runtime/codex/mcp-config.js" "${ROOT_DIR}"
+)
 
 if [[ -f "${PID_FILE}" ]]; then
   EXISTING_PID="$(cat "${PID_FILE}")"
@@ -36,7 +58,7 @@ if [[ -n "${EXISTING_PID}" ]]; then
   exit 0
 fi
 
-nohup codex app-server --listen "${LISTEN_URL}" >> "${LOG_FILE}" 2>&1 &
+nohup "${CODEX_COMMAND}" "${MCP_CONFIG_ARGS[@]}" app-server --listen "${LISTEN_URL}" >> "${LOG_FILE}" 2>&1 &
 APP_SERVER_PID=$!
 echo "${APP_SERVER_PID}" > "${PID_FILE}"
 sleep 1

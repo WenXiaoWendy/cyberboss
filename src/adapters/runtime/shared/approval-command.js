@@ -12,6 +12,10 @@ function buildApprovalMatchTokens({ toolName = "", commandTokens = [], input = n
   if (normalizedToolName === "read" && isImageFilePath(extractApprovalFilePath(input, options))) {
     return ["read_image"];
   }
+  const mcpToolTokens = extractMcpToolTokens(normalizedToolName);
+  if (mcpToolTokens.length) {
+    return mcpToolTokens;
+  }
 
   const rawTokens = normalizeCommandTokens(commandTokens).length
     ? normalizeCommandTokens(commandTokens)
@@ -260,6 +264,23 @@ function isShellWrapper(command, flag) {
   return (executable === "sh" || executable === "bash" || executable === "zsh") && normalizeString(flag) === "-lc";
 }
 
+function extractMcpToolTokens(toolName) {
+  const normalized = normalizeString(toolName).toLowerCase();
+  if (!normalized.startsWith("mcp__")) {
+    return [];
+  }
+  const parts = normalized.split("__").filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "mcp") {
+    return [];
+  }
+  const serverName = normalizeString(parts[1]);
+  const toolParts = parts.slice(2).map((part) => normalizeString(part)).filter(Boolean);
+  if (!serverName || !toolParts.length) {
+    return [];
+  }
+  return ["mcp_tool", serverName, toolParts.join("__")];
+}
+
 function baseName(value) {
   const normalized = normalizeString(value).replace(/\\/g, "/");
   if (!normalized) {
@@ -317,4 +338,5 @@ module.exports = {
   matchesCommandPrefix,
   normalizeCommandTokens,
   splitCommandLine,
+  extractMcpToolTokens,
 };

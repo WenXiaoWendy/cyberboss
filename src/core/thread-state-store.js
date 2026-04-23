@@ -56,10 +56,15 @@ class ThreadStateStore {
       case "runtime.approval.requested":
         next.status = "waiting_approval";
         next.pendingApproval = {
+          kind: event.payload.kind || "command",
           requestId: event.payload.requestId ?? null,
           reason: event.payload.reason || "",
           command: event.payload.command || "",
           commandTokens: Array.isArray(event.payload.commandTokens) ? event.payload.commandTokens : [],
+          filePath: event.payload.filePath || "",
+          filePaths: Array.isArray(event.payload.filePaths) ? event.payload.filePaths.slice() : [],
+          elicitation: event.payload.elicitation || null,
+          responseTemplate: event.payload.responseTemplate || null,
         };
         break;
       case "runtime.turn.completed":

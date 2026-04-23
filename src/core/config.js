@@ -30,9 +30,27 @@ function readConfig() {
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
     timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),
+    projectToolContextFile: path.join(stateDir, "project-tool-runtime-context.json"),
     weixinInstructionsFile: path.join(stateDir, "weixin-instructions.md"),
     weixinOperationsFile: path.resolve(__dirname, "..", "..", "templates", "weixin-operations.md"),
     diaryDir: path.join(stateDir, "diary"),
+    locationStoreFile: path.join(stateDir, "locations.json"),
+    locationHost: readTextEnv("CYBERBOSS_LOCATION_HOST") || "0.0.0.0",
+    locationPort: readIntEnv("CYBERBOSS_LOCATION_PORT") || 4318,
+    locationToken: readTextEnv("CYBERBOSS_LOCATION_TOKEN"),
+    locationHistoryLimit: readIntEnv("CYBERBOSS_LOCATION_HISTORY_LIMIT") || 1000,
+    locationMovementEventLimit: readIntEnv("CYBERBOSS_LOCATION_MOVEMENT_EVENT_LIMIT"),
+    locationBatteryHistoryLimit: readIntEnv("CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT"),
+    locationKnownPlaces: readKnownPlacesEnv(),
+    locationKnownPlaceRadiusMeters: readIntEnv("CYBERBOSS_LOCATION_PLACE_RADIUS_METERS") || 150,
+    locationStayMergeRadiusMeters: readIntEnv("CYBERBOSS_LOCATION_STAY_MERGE_RADIUS_METERS") || 100,
+    locationStayBreakConfirmRadiusMeters: readIntEnv("CYBERBOSS_LOCATION_STAY_BREAK_RADIUS_METERS") || 200,
+    locationStayBreakConfirmSamples: readIntEnv("CYBERBOSS_LOCATION_STAY_BREAK_SAMPLES") || 2,
+    locationMajorMoveThresholdMeters: readIntEnv("CYBERBOSS_LOCATION_MAJOR_MOVE_THRESHOLD_METERS") || 1000,
+    startWithLocationServer: resolveLocationServerEnabled({
+      mode,
+      enabled: readOptionalBoolEnv("CYBERBOSS_ENABLE_LOCATION_SERVER"),
+    }),
     syncBufferDir: path.join(stateDir, "sync-buffers"),
     codexEndpoint: readTextEnv("CYBERBOSS_CODEX_ENDPOINT"),
     codexCommand: readTextEnv("CYBERBOSS_CODEX_COMMAND"),
@@ -65,6 +83,20 @@ function readBoolEnv(name) {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
+function readOptionalBoolEnv(name) {
+  const value = readTextEnv(name).toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (value === "1" || value === "true" || value === "yes" || value === "on") {
+    return true;
+  }
+  if (value === "0" || value === "false" || value === "no" || value === "off") {
+    return false;
+  }
+  return undefined;
+}
+
 function readIntEnv(name) {
   const value = readTextEnv(name);
   if (!value) {
@@ -74,8 +106,52 @@ function readIntEnv(name) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function readKnownPlacesEnv() {
+  const fromJson = parseKnownPlacesJson(readTextEnv("CYBERBOSS_LOCATION_KNOWN_PLACES"));
+  const fromCenters = [
+    parseKnownPlaceCenter("home", readTextEnv("CYBERBOSS_LOCATION_HOME_CENTER")),
+    parseKnownPlaceCenter("work", readTextEnv("CYBERBOSS_LOCATION_WORK_CENTER")),
+  ].filter(Boolean);
+  return [...fromJson, ...fromCenters];
+}
+
+function parseKnownPlacesJson(value) {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseKnownPlaceCenter(tag, value) {
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length !== 2) {
+    return null;
+  }
+  const latitude = Number(parts[0]);
+  const longitude = Number(parts[1]);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+  return { tag, latitude, longitude };
+}
+
 function hasArgFlag(argv, flag) {
   return Array.isArray(argv) && argv.some((item) => String(item || "").trim() === flag);
+}
+
+function resolveLocationServerEnabled({ mode, enabled }) {
+  if (mode !== "start") {
+    return false;
+  }
+  if (typeof enabled === "boolean") {
+    return enabled;
+  }
+  return false;
 }
 
 module.exports = { readConfig };

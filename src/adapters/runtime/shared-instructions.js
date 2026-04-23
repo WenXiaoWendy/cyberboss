@@ -45,7 +45,6 @@ function loadWechatInstructions(config = {}) {
   if (operations) {
     sections.push(operations);
   }
-  sections.push("For local commands, you must strictly follow workspace help only. Do not invent variants.");
   return sections.join("\n\n").trim();
 }
 

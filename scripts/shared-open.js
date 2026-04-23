@@ -176,7 +176,7 @@ function handleIpcMessage(msg) {
         const inputStr = event.input
           ? JSON.stringify(event.input, null, 2)
           : "";
-        console.log(`\n${c.yellow}● ${event.toolName || "Tool"}${c.reset}`);
+        console.log(`\n${c.yellow}● ${formatReadableToolName(event.toolName) || "Tool"}${c.reset}`);
         if (inputStr) {
           console.log(inputStr.split("\n").map((l) => `  ${l}`).join("\n"));
         }
@@ -199,10 +199,13 @@ function handleIpcMessage(msg) {
         console.log(`\n${c.gray}[Thinking]${c.reset}\n${event.text}\n`);
         break;
       case "approval.requested": {
+        if (isProjectNativeToolApproval(event.toolName)) {
+          break;
+        }
         const inputStr = event.input
           ? JSON.stringify(event.input, null, 2)
           : "";
-        console.log(`\n${c.magenta}[Approval] ${event.toolName || ""}${c.reset}`);
+        console.log(`\n${c.magenta}[Approval] ${formatReadableToolName(event.toolName) || ""}${c.reset}`);
         if (inputStr) console.log(inputStr);
         console.log(`${c.gray}─────────────────────────${c.reset}`);
         console.log(`Reply: ${c.green}/yes${c.reset}  ${c.yellow}/always${c.reset}  ${c.red}/no${c.reset}\n`);
@@ -220,6 +223,23 @@ function handleIpcMessage(msg) {
   } else if (msg.type === "inboundMessage") {
     console.log(`\n${c.cyan}[WeChat → ClaudeCode]${c.reset}\n${msg.text || ""}\n`);
   }
+}
+
+function formatReadableToolName(toolName) {
+  const normalized = typeof toolName === "string" ? toolName.trim() : "";
+  if (!normalized.startsWith("mcp__")) {
+    return normalized;
+  }
+  const parts = normalized.split("__").filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "mcp") {
+    return normalized;
+  }
+  return parts.slice(2).join("__") || normalized;
+}
+
+function isProjectNativeToolApproval(toolName) {
+  const normalized = typeof toolName === "string" ? toolName.trim().toLowerCase() : "";
+  return normalized.startsWith("mcp__cyberboss_tools__");
 }
 
 main().catch((error) => {

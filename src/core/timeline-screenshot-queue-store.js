@@ -84,7 +84,17 @@ function normalizeTimelineScreenshotJob(job) {
   const senderId = normalizeText(job.senderId);
   const outputFile = normalizeText(job.outputFile);
   const createdAt = normalizeIsoTime(job.createdAt);
-  const args = normalizeArgs(job.args);
+  const selector = normalizeText(job.selector);
+  const range = normalizeText(job.range);
+  const date = normalizeText(job.date);
+  const week = normalizeText(job.week);
+  const month = normalizeText(job.month);
+  const category = normalizeText(job.category);
+  const subcategory = normalizeText(job.subcategory);
+  const width = normalizePositiveInteger(job.width);
+  const height = normalizePositiveInteger(job.height);
+  const sidePadding = normalizeNonNegativeInteger(job.sidePadding);
+  const locale = normalizeText(job.locale);
 
   if (!id || !accountId || !senderId) {
     return null;
@@ -95,15 +105,29 @@ function normalizeTimelineScreenshotJob(job) {
     accountId,
     senderId,
     outputFile,
-    args,
+    selector,
+    range,
+    date,
+    week,
+    month,
+    category,
+    subcategory,
+    width,
+    height,
+    sidePadding,
+    locale,
     createdAt: createdAt || new Date().toISOString(),
   };
 }
 
-function normalizeArgs(args) {
-  return Array.isArray(args)
-    ? args.map((value) => normalizeText(value)).filter(Boolean)
-    : [];
+function normalizePositiveInteger(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeNonNegativeInteger(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function normalizeIsoTime(value) {

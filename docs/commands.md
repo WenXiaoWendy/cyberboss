@@ -67,57 +67,27 @@ The intentionally small public set is:
 - `npm run doctor`
 - `npm run help`
 
-## Capability Commands
+## Project Tools
 
-### channel
+Models no longer use local capability CLI commands for diary, reminders, timeline, screenshots, or file sending.
 
-- `npm run channel:send-file -- --path /absolute/path`
+Those capabilities are exposed as project-native structured tools:
 
-Notes:
-- Sends an existing local file back to the current WeChat chat
-- `--user <wechatUserId>` can override the default receiver
-
-### reminder
-
-- `cyberboss reminder write --delay 30m --text "Reminder text"`
-- `cyberboss reminder write --delay 1h30m --text "Reminder text"`
-- `cyberboss reminder write --delay 20m --text-file /absolute/path/to/reminder.txt`
-- `cyberboss reminder write --at "2026-04-07 21:30" --text "Reminder text"`
-
-### diary
-
-- `cyberboss diary write --title "Title" --text "Content"`
-- `cyberboss diary write --date 2026-04-06 --title "4.6" --text-file /absolute/path/to/entry.md`
+- `cyberboss_channel_send_file`
+- `cyberboss_diary_append`
+- `cyberboss_reminder_create`
+- `cyberboss_system_send`
+- `cyberboss_timeline_write`
+- `cyberboss_timeline_build`
+- `cyberboss_timeline_serve`
+- `cyberboss_timeline_dev`
+- `cyberboss_timeline_screenshot`
 
 Notes:
-- `--title` only affects the entry title
-- `--date` decides which diary file to write into
-- `--time` is optional and overrides the entry time
-
-### system
-
-- `cyberboss system send --text "System message"`
-- `cyberboss system checkin-poller`
-
-Notes:
-- `checkin` is usually better started through shared mode: `npm run shared:start`
-- `system:checkin` remains available as the low-level polling entrypoint
-
-### timeline
-
-- `cyberboss timeline write --date YYYY-MM-DD --events-file /absolute/path/to/events.json`
-- `cyberboss timeline build`
-- `cyberboss timeline serve`
-- `cyberboss timeline dev`
-- `cyberboss timeline screenshot --send`
-- `cyberboss timeline serve --locale zh-CN`
-- `cyberboss timeline screenshot --send --locale en`
-
-Notes:
-- `timeline:screenshot -- --send` queues the screenshot for the current WeChat bridge and automatically sends the result back to the current WeChat user.
-- `TIMELINE_FOR_AGENT_LOCALE` supports `en` and `zh-CN` and controls the language of the timeline UI and screenshots.
-
-All `reminder / diary / system / timeline` commands listed here are already usable.
+- These tools are bound to the Cyberboss project and routed through the repo's internal tool host.
+- Claude Code loads them through workspace-local `.mcp.json` injected by Cyberboss and passed to Claude at startup with `--mcp-config`.
+- Codex loads them through the runtime-side Cyberboss MCP bridge configured at spawn time.
+- The public human terminal surface stays intentionally small: lifecycle commands plus shared bridge scripts.
 
 ## Current WeChat Commands
 
@@ -140,7 +110,7 @@ All `reminder / diary / system / timeline` commands listed here are already usab
 
 Notes:
 
-- `/status` now covers what used to be split between `where` and `usage`
-- there is currently no separate `/context` command; use `/status` and read the `📦 context` line
+- `/status` covers thread, workspace, and context details
+- there is no separate `/context` command; use `/status` and read the `📦 context` line
 - `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command

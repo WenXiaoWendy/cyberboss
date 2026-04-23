@@ -53,37 +53,75 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
+    const finishResolve = (value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const finishReject = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
 
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString("utf8");
       stdout += text;
-      process.stdout.write(text);
+      const startup = detectTimelineServerStartup(options.subcommand, stdout);
+      if (startup) {
+        finishResolve({
+          subcommand: options.subcommand || "",
+          args,
+          stdout,
+          stderr,
+          ...startup,
+        });
+      }
     });
 
     child.stderr.on("data", (chunk) => {
       const text = chunk.toString("utf8");
       stderr += text;
-      process.stderr.write(text);
     });
 
-    child.once("error", reject);
+    child.once("error", (error) => {
+      finishReject(error);
+    });
     child.once("exit", (code, signal) => {
       if (signal) {
-        reject(new Error(`timeline process was interrupted by signal: ${signal}`));
+        finishReject(new Error(`timeline process was interrupted by signal: ${signal}`));
         return;
       }
       if (code !== 0) {
-        reject(new Error(`timeline command failed with exit code ${code}`));
+        finishReject(new Error(buildTimelineFailureMessage({
+          subcommand: options.subcommand,
+          code,
+          stdout,
+          stderr,
+        })));
         return;
       }
       if (options.subcommand === "write") {
         const failure = detectTimelineWriteFailure(stdout, stderr);
         if (failure) {
-          reject(new Error(failure));
+          finishReject(new Error(failure));
           return;
         }
       }
-      resolve();
+      finishResolve({
+        subcommand: options.subcommand || "",
+        args,
+        stdout,
+        stderr,
+        ...detectTimelineSuccess(options.subcommand, stdout),
+      });
     });
   });
 }
@@ -215,7 +253,99 @@ function detectTimelineWriteFailure(stdout, stderr) {
   return "";
 }
 
+function detectTimelineServerStartup(subcommand, stdout) {
+  const normalizedSubcommand = normalizeText(subcommand);
+  if (normalizedSubcommand === "serve") {
+    const url = matchTimelineUrl(stdout, /timeline dashboard:\s*(https?:\/\/\S+)/i);
+    if (url) {
+      return { url };
+    }
+  }
+  if (normalizedSubcommand === "dev") {
+    const url = matchTimelineUrl(stdout, /timeline dev:\s*(https?:\/\/\S+)/i);
+    if (url) {
+      return { url };
+    }
+  }
+  return null;
+}
+
+function detectTimelineSuccess(subcommand, stdout) {
+  const startup = detectTimelineServerStartup(subcommand, stdout);
+  if (startup) {
+    return startup;
+  }
+  if (normalizeText(subcommand) === "screenshot") {
+    const outputFile = matchTimelineText(stdout, /timeline screenshot saved:\s*(.+)/i);
+    if (outputFile) {
+      return { outputFile };
+    }
+  }
+  return {};
+}
+
+function buildTimelineFailureMessage({ subcommand = "", code = 0, stdout = "", stderr = "" } = {}) {
+  const output = `${stdout}\n${stderr}`.trim();
+  const normalizedSubcommand = normalizeText(subcommand) || "command";
+  const errorSummary = extractTimelineErrorSummary(output);
+  const portInUse = /(EADDRINUSE|address already in use|listen EADDRINUSE)/i.test(output);
+  if (portInUse) {
+    const port = matchTimelineText(errorSummary || output, /(?:127\.0\.0\.1:|port\s+)(\d{2,5})/i);
+    return `timeline ${normalizedSubcommand} failed because the port is already in use${port ? ` (${port})` : ""}. ${errorSummary || summarizeTimelineOutput(output)}`;
+  }
+  const siteMissing = /timeline site not built/i.test(output);
+  if (siteMissing) {
+    return `timeline ${normalizedSubcommand} failed because the site is not built. ${errorSummary || summarizeTimelineOutput(output)}`;
+  }
+  return `timeline ${normalizedSubcommand} failed with exit code ${code}. ${errorSummary || summarizeTimelineOutput(output)}`;
+}
+
+function extractTimelineErrorSummary(output) {
+  const lines = String(output || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return "";
+  }
+  const explicitError = lines.find((line) => /^Error:/i.test(line));
+  if (explicitError) {
+    return explicitError;
+  }
+  const invalidEvent = lines.find((line) => /Invalid timeline event at index/i.test(line));
+  if (invalidEvent) {
+    return invalidEvent;
+  }
+  const lockError = lines.find((line) => /timeline-write is currently locked by another process/i.test(line));
+  if (lockError) {
+    return lockError;
+  }
+  return "";
+}
+
+function summarizeTimelineOutput(output) {
+  const normalized = String(output || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!normalized.length) {
+    return "No additional output was captured.";
+  }
+  return `Output: ${normalized.slice(-4).join(" | ")}`;
+}
+
+function matchTimelineUrl(text, pattern) {
+  return matchTimelineText(text, pattern);
+}
+
+function matchTimelineText(text, pattern) {
+  const match = String(text || "").match(pattern);
+  return normalizeText(match?.[1]);
+}
+
 module.exports = {
   createTimelineIntegration,
+  buildTimelineFailureMessage,
+  detectTimelineServerStartup,
   prepareTimelineInvocation,
 };

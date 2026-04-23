@@ -46,7 +46,7 @@ function buildSystemInboundText(text, createdAt = "") {
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
-    "Do any timeline/diary/reminder work in this turn.",
+    "Do any timeline/diary/reminder/whereabouts work in this turn.",
     "If you act, end with send_message that briefly and naturally reflects what you did or what changed; use silent only if you do nothing.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",

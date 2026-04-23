@@ -41,12 +41,13 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
         },
       };
     case "approval.requested":
+      const readableToolName = formatReadableToolName(message.toolName);
       return {
         type: "runtime.approval.requested",
         payload: {
           threadId: message.sessionId,
           requestId: message.requestId,
-          reason: `Tool: ${message.toolName || ""}`,
+          reason: `Tool: ${readableToolName || ""}`,
           command: formatToolCommand(message.toolName, message.input),
           filePath: extractApprovalFilePath(message.input, { preferredKeys: ["file_path", "filePath", "path"] }),
           filePaths: extractApprovalFilePaths(message.input, { preferredKeys: ["file_path", "filePath", "path"] }),
@@ -76,7 +77,7 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
 }
 
 function formatToolCommand(toolName, input) {
-  const name = typeof toolName === "string" ? toolName : "";
+  const name = formatReadableToolName(toolName);
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return name;
   }
@@ -89,6 +90,18 @@ function formatToolCommand(toolName, input) {
     .join("\n");
   const full = `${name}\n${formatted}`;
   return truncateCommand(full);
+}
+
+function formatReadableToolName(toolName) {
+  const normalized = typeof toolName === "string" ? toolName.trim() : "";
+  if (!normalized.startsWith("mcp__")) {
+    return normalized;
+  }
+  const parts = normalized.split("__").filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "mcp") {
+    return normalized;
+  }
+  return parts.slice(2).join("__") || normalized;
 }
 
 function truncateCommand(text, maxLines = 6, maxLineLength = 100) {

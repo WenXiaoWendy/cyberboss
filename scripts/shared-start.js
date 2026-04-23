@@ -10,10 +10,12 @@ const {
 } = require("./shared-common");
 
 async function main() {
+  const runtime = process.env.CYBERBOSS_RUNTIME || "codex";
+  console.log(`starting shared bridge runtime=${runtime}`);
   const appServer = await ensureSharedAppServer();
   const appServerPidLabel = appServer.pid ? ` pid=${appServer.pid}` : "";
   if (appServer.status === "skipped") {
-    console.log(`shared app-server skipped (runtime=${process.env.CYBERBOSS_RUNTIME || "codex"})`);
+    console.log(`shared app-server skipped (runtime=${runtime})`);
   } else {
     console.log(`shared app-server ${appServer.status}${appServerPidLabel} listen=${listenUrl}`);
   }
@@ -25,7 +27,7 @@ async function main() {
   }
 
   const childEnv = { ...process.env };
-  const isCodex = !process.env.CYBERBOSS_RUNTIME || process.env.CYBERBOSS_RUNTIME === "codex";
+  const isCodex = runtime === "codex";
   if (isCodex) {
     childEnv.CYBERBOSS_CODEX_ENDPOINT = listenUrl;
   }

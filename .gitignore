@@ -1,7 +1,9 @@
 node_modules/
 .DS_Store
 .env
+.mcp.json
+.claude/settings.json
+.claude/settings.local.json
 npm-debug.log*
 third_party/
 firmware/
-

@@ -4,10 +4,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { buildAgentCommandGuide, buildAgentCommandReminder } = require("../src/core/command-registry");
-const { resolveBody: resolveReminderBody } = require("../src/app/reminder-write-cli");
-const { resolveBody: resolveDiaryBody } = require("../src/app/diary-write-cli");
-const { prepareTimelineInvocation } = require("../src/integrations/timeline");
+const { resolveBodyInput } = require("../src/services/text-input");
+const { buildTimelineFailureMessage, prepareTimelineInvocation } = require("../src/integrations/timeline");
 
 function createTempFile(name, content) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-command-test-"));
@@ -16,39 +14,15 @@ function createTempFile(name, content) {
   return filePath;
 }
 
-test("agent command reminder stays short and avoids npm prefix env", () => {
-  const reminder = buildAgentCommandReminder();
-  assert.match(reminder, /must strictly follow workspace help only/i);
-  assert.doesNotMatch(reminder, /CYBERBOSS_HOME/);
-  assert.doesNotMatch(reminder, /npm --prefix/);
-});
-
-test("scoped command guide uses the cyberboss launcher for the requested topic only", () => {
-  const guide = buildAgentCommandGuide(["reminder"]);
-  assert.match(guide, /REMINDER COMMAND HELP/);
-  assert.match(guide, /bin[\\/]+cyberboss(?:\.cmd)?/);
-  assert.doesNotMatch(guide, /TIMELINE COMMAND HELP/);
-  assert.doesNotMatch(guide, /CYBERBOSS_HOME/);
-  assert.doesNotMatch(guide, /npm --prefix/);
-});
-
-test("timeline command guide shows a valid event payload shape", () => {
-  const guide = buildAgentCommandGuide(["timeline"]);
-  assert.match(guide, /"events":\[/);
-  assert.match(guide, /"startAt":/);
-  assert.match(guide, /"endAt":/);
-  assert.match(guide, /"subcategoryId":/);
-});
-
 test("reminder body can be loaded from --text-file", async () => {
   const filePath = createTempFile("reminder.txt", "  remember me  \n");
-  const body = await resolveReminderBody({ text: "", textFile: filePath, useStdin: false });
+  const body = await resolveBodyInput({ text: "", textFile: filePath });
   assert.equal(body, "remember me");
 });
 
 test("diary body can be loaded from --text-file", async () => {
   const filePath = createTempFile("diary.md", "\nline one\nline two\n");
-  const body = await resolveDiaryBody({ text: "", textFile: filePath, useStdin: false });
+  const body = await resolveBodyInput({ text: "", textFile: filePath });
   assert.equal(body, "line one\nline two");
 });
 
@@ -71,4 +45,14 @@ test("timeline invocation rejects mixed json sources", () => {
   assert.throws(() => {
     prepareTimelineInvocation("write", ["--json", "[]", "--events-json", "[]"]);
   }, /Use only one of --json, --events-json, or --events-file/);
+});
+
+test("timeline failure message explains port conflicts", () => {
+  const message = buildTimelineFailureMessage({
+    subcommand: "serve",
+    code: 1,
+    stderr: "Error: listen EADDRINUSE: address already in use 127.0.0.1:4317",
+  });
+  assert.match(message, /port is already in use/i);
+  assert.match(message, /4317/);
 });

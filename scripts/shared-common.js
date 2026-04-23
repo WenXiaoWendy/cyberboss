@@ -3,6 +3,10 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const {
+  buildCodexMcpConfigArgs,
+  resolveCodexProjectToolMcpServerConfig,
+} = require("../src/adapters/runtime/codex/mcp-config");
 
 try {
   require("dotenv").config({ path: path.join(process.cwd(), ".env") });
@@ -143,7 +147,10 @@ async function ensureSharedAppServer() {
   }
 
   const command = process.env.CYBERBOSS_CODEX_COMMAND || "codex";
-  const pid = spawnDetachedCommand(command, ["app-server", "--listen", listenUrl], {
+  const mcpConfigArgs = buildCodexMcpConfigArgs(resolveCodexProjectToolMcpServerConfig({
+    cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
+  }));
+  const pid = spawnDetachedCommand(command, [...mcpConfigArgs, "app-server", "--listen", listenUrl], {
     logFile: appServerLogFile,
     env,
   });

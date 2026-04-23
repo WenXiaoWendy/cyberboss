@@ -2,6 +2,7 @@ const path = require("path");
 const os = require("os");
 const { ClaudeCodeProcessClient } = require("./process-client");
 const { mapClaudeCodeMessageToRuntimeEvent } = require("./events");
+const { ensureClaudeProjectMcpConfig } = require("./project-settings");
 const { SessionStore } = require("../codex/session-store");
 const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
 const { ClaudeCodeIpcServer } = require("./ipc-server");
@@ -37,6 +38,13 @@ function createClaudeCodeRuntimeAdapter(config) {
     if (clientsByWorkspace.has(workspaceRoot)) {
       return clientsByWorkspace.get(workspaceRoot);
     }
+    const projectSettings = ensureClaudeProjectMcpConfig({
+      workspaceRoot,
+      cyberbossHome: process.env.CYBERBOSS_HOME || path.resolve(__dirname, "..", "..", "..", ".."),
+    });
+    console.log(
+      `[claudecode-runtime] workspace=${workspaceRoot} mcp_config=${projectSettings.configPath} server=${projectSettings.serverName}`
+    );
     const client = new ClaudeCodeProcessClient({
       command: config.claudeCommand || "claude",
       cwd: workspaceRoot,
@@ -45,6 +53,7 @@ function createClaudeCodeRuntimeAdapter(config) {
       permissionMode: config.claudePermissionMode || "default",
       disableVerbose: Boolean(config.claudeDisableVerbose),
       extraArgs: config.claudeExtraArgs || [],
+      mcpConfigPaths: [projectSettings.configPath],
       ipcServer,
       workspaceRoot,
     });
@@ -184,16 +193,24 @@ function createClaudeCodeRuntimeAdapter(config) {
       await closeWorkspaceClient(workspaceRoot);
       return { workspaceRoot };
     },
-    async respondApproval({ requestId, decision }) {
+    async respondApproval({ requestId, decision, result = null }) {
       const workspaceRoot = pendingApprovals.get(requestId);
       const candidates = workspaceRoot
         ? [clientsByWorkspace.get(workspaceRoot)]
         : [...clientsByWorkspace.values()];
       for (const client of candidates) {
         if (client?.alive) {
-          await client.sendResponse(requestId, { decision });
+          const responsePayload = result && typeof result === "object"
+            ? result
+            : { decision };
+          await client.sendResponse(requestId, responsePayload);
           pendingApprovals.delete(requestId);
-          return { requestId, decision: decision === "accept" ? "accept" : "decline" };
+          return {
+            requestId,
+            ...(result && typeof result === "object"
+              ? { result: responsePayload }
+              : { decision: decision === "accept" ? "accept" : "decline" }),
+          };
         }
       }
       throw new Error("no active claudecode session to respond to approval");

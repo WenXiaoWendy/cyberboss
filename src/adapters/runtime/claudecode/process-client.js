@@ -1,7 +1,7 @@
 const { spawn } = require("child_process");
 
 class ClaudeCodeProcessClient {
-  constructor({ command = "claude", cwd, env, model = "", permissionMode = "default", disableVerbose = false, extraArgs = [], ipcServer = null, workspaceRoot = "" }) {
+  constructor({ command = "claude", cwd, env, model = "", permissionMode = "default", disableVerbose = false, extraArgs = [], mcpConfigPaths = [], ipcServer = null, workspaceRoot = "" }) {
     this.command = command;
     this.cwd = cwd;
     this.env = env;
@@ -9,6 +9,7 @@ class ClaudeCodeProcessClient {
     this.permissionMode = permissionMode;
     this.disableVerbose = disableVerbose;
     this.extraArgs = extraArgs;
+    this.mcpConfigPaths = mcpConfigPaths;
     this.ipcServer = ipcServer;
     this.workspaceRoot = workspaceRoot;
     this.child = null;
@@ -51,9 +52,16 @@ class ClaudeCodeProcessClient {
       permissionMode: this.permissionMode,
       disableVerbose: this.disableVerbose,
       extraArgs: this.extraArgs,
+      mcpConfigPaths: this.mcpConfigPaths,
       resumeSessionId,
     });
     const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(this.command);
+    const mcpLabel = this.mcpConfigPaths.length
+      ? this.mcpConfigPaths.join(",")
+      : "(none)";
+    console.log(
+      `[claudecode-runtime] launching command=${this.command} cwd=${this.cwd} mcp_config=${mcpLabel}`
+    );
     const child = spawn(this.command, args, {
       cwd: this.cwd,
       env: this.env,
@@ -348,7 +356,7 @@ class ClaudeCodeProcessClient {
   }
 }
 
-function buildArgs({ model, permissionMode, disableVerbose, extraArgs, resumeSessionId }) {
+function buildArgs({ model, permissionMode, disableVerbose, extraArgs, mcpConfigPaths, resumeSessionId }) {
   const args = [
     "--output-format", "stream-json",
     "--input-format", "stream-json",
@@ -365,6 +373,13 @@ function buildArgs({ model, permissionMode, disableVerbose, extraArgs, resumeSes
   }
   if (model) {
     args.push("--model", model);
+  }
+  if (Array.isArray(mcpConfigPaths)) {
+    for (const configPath of mcpConfigPaths) {
+      if (typeof configPath === "string" && configPath.trim()) {
+        args.push("--mcp-config", configPath.trim());
+      }
+    }
   }
   if (Array.isArray(extraArgs)) {
     const safe = extraArgs.filter((arg) =>
