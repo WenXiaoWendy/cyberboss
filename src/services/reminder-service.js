@@ -69,6 +69,33 @@ class ReminderService {
     });
     return reminder;
   }
+
+  list({ limit = 0, userId = "" } = {}, context = {}) {
+    this.queue.load();
+    const all = Array.isArray(this.queue.state?.reminders) ? this.queue.state.reminders.slice() : [];
+
+    const account = resolveSelectedAccount(this.config);
+    const senderFilter = resolveReminderSenderId({
+      config: this.config,
+      accountId: account.accountId,
+      explicitUser: userId,
+      context,
+      sessionStore: this.sessionStore,
+    });
+
+    const filtered = all
+      .filter((reminder) => reminder.accountId === account.accountId)
+      .filter((reminder) => !senderFilter || reminder.senderId === senderFilter);
+    const safeLimit = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 0;
+    const limited = safeLimit > 0 ? filtered.slice(0, safeLimit) : filtered;
+
+    const nowMs = Date.now();
+    return {
+      total: filtered.length,
+      senderId: senderFilter || "",
+      reminders: limited.map((reminder) => sanitizeReminderForOutput(reminder, nowMs)),
+    };
+  }
 }
 
 function resolveReminderSenderId({ config, accountId, explicitUser = "", context = {}, sessionStore = null }) {
@@ -185,6 +212,23 @@ function normalizeAbsoluteTimeString(value) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function sanitizeReminderForOutput(reminder, nowMs) {
+  const dueAtMs = Number(reminder?.dueAtMs);
+  const overdue = Number.isFinite(dueAtMs) ? dueAtMs <= nowMs : false;
+  const dueIn = Number.isFinite(dueAtMs) ? Math.max(0, dueAtMs - nowMs) : 0;
+  return {
+    id: reminder?.id || "",
+    senderId: reminder?.senderId || "",
+    text: reminder?.text || "",
+    dueAtMs: Number.isFinite(dueAtMs) ? dueAtMs : 0,
+    dueAtIso: Number.isFinite(dueAtMs) ? new Date(dueAtMs).toISOString() : "",
+    dueInMs: dueIn,
+    dueInMinutes: Math.round(dueIn / 60000),
+    overdue,
+    createdAt: reminder?.createdAt || "",
+  };
 }
 
 module.exports = {

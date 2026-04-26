@@ -128,6 +128,11 @@ async function main() {
     return;
   }
 
+  if (command === "reminders") {
+    getApp().printReminders(argv.slice(1));
+    return;
+  }
+
   if (command === "start") {
     await getApp().start();
     return;
