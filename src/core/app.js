@@ -7,6 +7,7 @@ const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
+const { createCopilotRuntimeAdapter } = require("../adapters/runtime/copilot");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { buildWeixinHelpText } = require("./command-registry");
@@ -43,6 +44,9 @@ const FIRST_RUNTIME_EVENT_FAILURE_TIMEOUT_MS = 45_000;
 function createRuntimeAdapter(config) {
   if (config.runtime === "claudecode") {
     return createClaudeCodeRuntimeAdapter(config);
+  }
+  if (config.runtime === "copilot") {
+    return createCopilotRuntimeAdapter(config);
   }
   return createCodexRuntimeAdapter(config);
 }
@@ -107,6 +111,54 @@ class CyberbossApp {
 
   printAccounts() {
     this.channelAdapter.printAccounts();
+  }
+
+  printReminders(argv = []) {
+    const args = Array.isArray(argv) ? argv : [];
+    const readFlag = (flag) => {
+      for (let i = 0; i < args.length; i += 1) {
+        if (args[i] === flag) return String(args[i + 1] || "").trim();
+      }
+      return "";
+    };
+    const limitText = readFlag("--limit");
+    const limit = limitText ? Math.max(0, Number.parseInt(limitText, 10) || 0) : 0;
+    const userId = readFlag("--sender") || readFlag("--user");
+    const jsonMode = args.includes("--json");
+
+    const result = this.projectServices.reminder.list({ limit, userId });
+
+    if (jsonMode) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log(`source=${this.config.reminderQueueFile}`);
+    const filterLabel = result.senderId ? ` sender=${result.senderId}` : "";
+    console.log(`total=${result.total}${filterLabel}`);
+
+    if (!result.reminders.length) {
+      console.log("(no reminders)");
+      return;
+    }
+
+    for (const reminder of result.reminders) {
+      const dueLocal = new Date(reminder.dueAtMs).toISOString().replace("T", " ").slice(0, 19);
+      const minutes = Number(reminder.dueInMinutes) || 0;
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      let remaining;
+      if (minutes <= 0) remaining = "0m";
+      else if (minutes < 60) remaining = `${minutes}m`;
+      else if (hours < 24) remaining = (minutes % 60) ? `${hours}h${minutes % 60}m` : `${hours}h`;
+      else remaining = (hours % 24) ? `${days}d${hours % 24}h` : `${days}d`;
+      const status = reminder.overdue ? "OVERDUE" : `in=${remaining}`;
+      const text = (reminder.text || "").replace(/\s+/g, " ").slice(0, 100);
+      console.log("");
+      console.log(`due=${dueLocal} [${status}]`);
+      console.log(`  id=${reminder.id}`);
+      console.log(`  text=${text}`);
+    }
   }
 
   async start() {
@@ -941,13 +993,15 @@ class CyberbossApp {
     const effectiveModel = (runtimeName === "claudecode" && isLikelyCodexModel)
       ? (this.config.claudeModel || "")
       : storedModel;
+    const runtimeReportedModel = (context && typeof context.model === "string" && context.model.trim()) || "";
+    const displayModel = effectiveModel || runtimeReportedModel;
 
     const lines = [
       `📍 workspace: ${workspaceRoot}`,
       `🧵 thread: ${threadId || "(none)"}${pendingThreadId ? " (pending verification)" : ""}`,
       `📊 status: ${threadState?.status || "idle"}`,
       `🤖 runtime: ${runtimeName}`,
-      `🤖 model: ${effectiveModel || "(default)"}`,
+      `🤖 model: ${displayModel || "(default)"}`,
     ];
     if (pendingThreadId) {
       lines.splice(2, 0, `🔁 target: ${pendingThreadId}`);
