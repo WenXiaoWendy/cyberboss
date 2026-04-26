@@ -61,6 +61,9 @@ function readConfig() {
     claudePermissionMode: readTextEnv("CYBERBOSS_CLAUDE_PERMISSION_MODE") || "default",
     claudeDisableVerbose: readBoolEnv("CYBERBOSS_CLAUDE_DISABLE_VERBOSE"),
     claudeExtraArgs: readListEnv("CYBERBOSS_CLAUDE_EXTRA_ARGS"),
+    copilotEndpoint: readTextEnv("CYBERBOSS_COPILOT_ENDPOINT"),
+    copilotCommand: readTextEnv("CYBERBOSS_COPILOT_COMMAND"),
+    copilotModel: readTextEnv("CYBERBOSS_COPILOT_MODEL"),
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
   };

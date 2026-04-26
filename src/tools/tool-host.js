@@ -112,6 +112,28 @@ const PROJECT_TOOLS = [
     },
   },
   {
+    name: "cyberboss_reminder_list",
+    description: "List queued reminders for the current WeChat user. Use this before assuming what reminders are still pending.",
+    shortHint: "List queued reminders for the current user; supports limit and userId.",
+    topics: ["reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Maximum number of reminders to return; omit for all." },
+        userId: { type: "string", description: "Optional explicit WeChat user id; defaults to the current sender." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = services.reminder.list(args, context);
+      const overdueCount = result.reminders.filter((reminder) => reminder.overdue).length;
+      return {
+        text: `Reminders loaded: ${result.reminders.length} of ${result.total} (overdue: ${overdueCount}).`,
+        data: result,
+      };
+    },
+  },
+  {
     name: "cyberboss_system_send",
     description: "Queue an internal Cyberboss system trigger for the current bound workspace and chat.",
     shortHint: "Queue an internal system message for the current workspace.",

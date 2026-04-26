@@ -18,6 +18,13 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "app.reminders",
+        summary: "List queued reminders for the current account",
+        terminal: ["reminders"],
+        weixin: [],
+        status: "active",
+      },
+      {
         action: "app.start",
         summary: "Start the current channel/runtime main loop",
         terminal: ["start"],
@@ -271,6 +278,7 @@ function buildTerminalHelpText() {
     "  cyberboss start        start the WeChat bridge and runtime loop",
     "  cyberboss login        start WeChat QR login",
     "  cyberboss accounts     list locally saved accounts",
+    "  cyberboss reminders    list queued reminders for the current account",
     "  cyberboss doctor       print current config and thread state",
     "  npm run shared:start   start the shared app-server and WeChat bridge",
     "  npm run shared:open    attach to the shared thread currently bound in WeChat",
