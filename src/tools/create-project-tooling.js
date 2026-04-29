@@ -4,6 +4,7 @@ const { createTimelineIntegration } = require("../integrations/timeline");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
 const { ReminderService } = require("../services/reminder-service");
+const { StickerService } = require("../services/sticker-service");
 const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
 const { RuntimeContextStore } = require("./runtime-context-store");
@@ -20,11 +21,13 @@ function createProjectTooling(config, options = {}) {
   const runtimeContextStore = options.runtimeContextStore || new RuntimeContextStore({
     filePath: config.projectToolContextFile,
   });
+  const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const services = {
     diary: new DiaryService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
     system: new SystemMessageService({ config, sessionStore }),
-    channelFile: new ChannelFileService({ config, channelAdapter, sessionStore }),
+    channelFile,
+    sticker: new StickerService({ config, channelAdapter, sessionStore, channelFileService: channelFile }),
     timeline: new TimelineService({ config, timelineIntegration, sessionStore }),
     whereabouts: new WhereaboutsService({
       config: {

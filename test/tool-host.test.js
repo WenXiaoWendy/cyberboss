@@ -26,6 +26,46 @@ function createHost() {
           return { filePath: args.filePath, userId: args.userId || "user-1" };
         },
       },
+      sticker: {
+        async listTags() {
+          return {
+            tags: ["可爱", "无语", "躺平"],
+            guidance: "Choose 1-3 tags.",
+          };
+        },
+        async pick(args) {
+          return {
+            tag: args.tag,
+            candidates: [
+              { stickerId: "stk_001", desc: "小猫贴脸蹭蹭，撒娇示爱" },
+            ],
+          };
+        },
+        async sendToCurrentChat(args) {
+          return {
+            stickerId: args.stickerId,
+            filePath: "/tmp/stk_001.gif",
+            delivery: { userId: args.userId || "user-1" },
+          };
+        },
+        async deleteById(args) {
+          return {
+            stickerId: args.stickerId,
+            filePath: "/tmp/stk_001.gif",
+            deleted: true,
+          };
+        },
+        async saveFromInbox(args) {
+          return {
+            stickerId: "stk_001",
+            filePath: "/tmp/stk_001.gif",
+            created: true,
+            deduped: false,
+            tags: args.tags,
+            desc: args.desc,
+          };
+        },
+      },
       timeline: {
         async read(args) {
           return {
@@ -157,6 +197,34 @@ test("tool host validates structured reminder input types", async () => {
       delayMinutes: "30",
     }, {});
   }, /input\.delayMinutes must be an integer/);
+});
+
+test("tool host exposes sticker tools with compact structured outputs", async () => {
+  const host = createHost();
+  const tagsResult = await host.invokeTool("cyberboss_sticker_tags", {}, {});
+  const pickResult = await host.invokeTool("cyberboss_sticker_pick", {
+    tag: "可爱",
+    limit: 3,
+  }, {});
+  const sendResult = await host.invokeTool("cyberboss_sticker_send", {
+    stickerId: "stk_001",
+  }, {});
+  const deleteResult = await host.invokeTool("cyberboss_sticker_delete", {
+    stickerId: "stk_001",
+  }, {});
+  const saveResult = await host.invokeTool("cyberboss_sticker_save_from_inbox", {
+    filePath: "/tmp/inbox/cat.png",
+    tags: ["可爱"],
+    desc: "小猫歪头卖萌",
+  }, {});
+
+  assert.equal(tagsResult.text, "Sticker tags loaded: 3.");
+  assert.equal(tagsResult.data.tags[0], "可爱");
+  assert.equal(pickResult.text, "Sticker candidates loaded: 1.");
+  assert.equal(pickResult.data.candidates[0].stickerId, "stk_001");
+  assert.equal(sendResult.text, "Sticker sent: stk_001");
+  assert.equal(deleteResult.text, "Sticker deleted: stk_001");
+  assert.equal(saveResult.text, "Sticker saved: stk_001");
 });
 
 test("tool host accepts structured timeline screenshot input", async () => {

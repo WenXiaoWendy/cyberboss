@@ -8,6 +8,7 @@ const { renderInstructionTemplate } = require("./core/instructions-template");
 const { CyberbossApp } = require("./core/app");
 const { runSystemCheckinPoller } = require("./app/system-checkin-poller");
 const { buildTerminalHelpText } = require("./core/command-registry");
+const { ensureStickerCatalogFilesSync } = require("./services/sticker-service");
 const { createProjectTooling } = require("./tools/create-project-tooling");
 const { runToolMcpServer } = require("./tools/mcp-stdio-server");
 
@@ -39,6 +40,7 @@ function ensureRuntimeEnv() {
 
 function ensureBootstrapFiles(config) {
   ensureInstructionsTemplate(config);
+  ensureStickerCatalogFilesSync(config);
 }
 
 function ensureInstructionsTemplate(config) {

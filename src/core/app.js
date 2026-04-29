@@ -30,7 +30,6 @@ const {
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 const { createProjectTooling } = require("../tools/create-project-tooling");
-
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
 const SESSION_EXPIRED_ERRCODE = -14;
@@ -2132,10 +2131,14 @@ function buildInboundText(normalized, persisted = {}, config = {}, options = {})
     lines.push(`You must read these files before replying to ${userName}.`);
     if (saved.some((item) => isImageAttachmentItem(item))) {
       if (runtimeUsesReadForImages(runtimeId)) {
-        lines.push("For images, use `Read` on the saved local image file.");
+        lines.push("Read images first. Use `Read` on the saved local image file.");
       } else {
-        lines.push("For images, use `view_image`.");
+        lines.push("Read images first. Use `view_image`.");
       }
+      lines.push("Do not comment on an image before reading it.");
+      lines.push("If it is clearly a reusable chat sticker, call `cyberboss_sticker_tags` only when needed, then save it with `cyberboss_sticker_save_from_inbox`.");
+      lines.push("Use 1-3 tags and a short `desc`. If readable text exists, append it in `desc`. Skip ordinary photos, screenshots, and unclear images.");
+      lines.push("Do not explain your save steps. The system will send its own sticker notice.");
     }
     lines.push(`If a required tool is missing, tell ${userName} exactly what is missing and that you cannot read the file yet.`);
   }

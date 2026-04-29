@@ -156,6 +156,15 @@ CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
 CYBERBOSS_WEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c
 CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
+CYBERBOSS_ENABLE_LOCATION_SERVER=false
+CYBERBOSS_LOCATION_HOST=0.0.0.0
+CYBERBOSS_LOCATION_PORT=4318
+CYBERBOSS_LOCATION_TOKEN=
+CYBERBOSS_LOCATION_HOME_CENTER=
+CYBERBOSS_LOCATION_WORK_CENTER=
+CYBERBOSS_LOCATION_KNOWN_PLACES=
+CYBERBOSS_LOCATION_PLACE_RADIUS_METERS=150
+CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
 ```
 
 这些变量的作用：
@@ -184,6 +193,22 @@ CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
   设置微信短分片合并阈值默认值。
 - `CYBERBOSS_WEIXIN_BASE_URL`、`CYBERBOSS_WEIXIN_CDN_BASE_URL`、`CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   在特殊部署环境下覆盖微信桥接接口地址和二维码 bot 类型。
+- `CYBERBOSS_ENABLE_LOCATION_SERVER`
+  是否启动内置 whereabouts HTTP 接收服务。
+- `CYBERBOSS_LOCATION_HOST`
+  内置 whereabouts HTTP 服务监听地址，默认 `0.0.0.0`。
+- `CYBERBOSS_LOCATION_PORT`
+  内置 whereabouts HTTP 服务端口，默认 `4318`。
+- `CYBERBOSS_LOCATION_TOKEN`
+  上传定位数据时使用的 Bearer token。
+- `CYBERBOSS_LOCATION_HOME_CENTER`、`CYBERBOSS_LOCATION_WORK_CENTER`
+  家和公司的中心坐标，格式 `lat,lng`。
+- `CYBERBOSS_LOCATION_KNOWN_PLACES`
+  额外地点标签，JSON 数组。
+- `CYBERBOSS_LOCATION_PLACE_RADIUS_METERS`
+  地点标签识别半径，默认 `150`。
+- `CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT`
+  电量观测保留数量，默认 `100`。
 
 
 `CYBERBOSS_ALLOWED_USER_IDS` 支持逗号分隔多个 user id。
@@ -313,6 +338,14 @@ ${HOME}/.cyberboss
   微信长轮询同步缓冲
 - `inbox/`
   保存收到的微信图片和附件
+- `stickers/`
+  表情包资产目录，包含：
+  - `assets/`
+    已入库表情包素材，当前统一规范化为 GIF
+  - `index.json`
+    表情包索引，维护 `stickerId -> { tags, desc }`
+  - `tags.json`
+    表情包标签表，AI 读取这里，用户也可以手动编辑这里
 - `weixin-instructions.md`
   首次运行自动生成的本地 instructions
 - `reminder-queue.json`
@@ -334,6 +367,29 @@ ${HOME}/.cyberboss
 
 仓库本身不包含你的微信账号、`context_token`、会话文件或其他运行态数据；这些都保存在状态目录里。
 
+### 行踪服务说明
+
+- Cyberboss 已内置 `whereabouts-mcp`，可以直接接收手机上传的定位、电量和触发原因。
+- 如果要启用内置行踪服务，至少需要配置：
+  - `CYBERBOSS_ENABLE_LOCATION_SERVER=true`
+  - `CYBERBOSS_LOCATION_TOKEN=<your_token>`
+  - `CYBERBOSS_LOCATION_HOME_CENTER=lat,lng`
+- 常用可选项：
+  - `CYBERBOSS_LOCATION_HOST`
+  - `CYBERBOSS_LOCATION_WORK_CENTER`
+  - `CYBERBOSS_LOCATION_KNOWN_PLACES`
+  - `CYBERBOSS_LOCATION_PLACE_RADIUS_METERS`
+  - `CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT`
+- 内置服务默认监听 `http://0.0.0.0:4318`，上传接口是 `POST /location/ingest`，健康检查是 `GET /healthz`。
+- 行踪数据默认写入 `~/.cyberboss/locations.json`，不是写进项目目录。
+
+### 表情包说明
+
+- 当前这条微信桥链路里，微信出入站都不能把动图展示能力当成可靠前提。不要假设发出去或收进来的 GIF 会在聊天窗口里正常播放。
+- 因此，表情包入库时当前统一规范化为 GIF，目的是先把资产格式收敛好。这样后续如果微信开放更完整的表情能力，可以直接复用现有库存而不用重新整理。
+- 标签表固定放在 `~/.cyberboss/stickers/tags.json`。AI 会从这里读取可用标签，用户也可以直接手动增删改。
+- 为了方便管理，当前表情包检索只做标签过滤，不做向量库召回。
+
 <a id="agent-guide"></a>
 ## Agent 接入
 
@@ -349,6 +405,16 @@ ${HOME}/.cyberboss
 - `cyberboss_timeline_dev`
 - `cyberboss_timeline_screenshot`
 - `cyberboss_channel_send_file`
+- `whereabouts_current_stay`
+- `whereabouts_recent_stays`
+- `whereabouts_recent_moves`
+- `whereabouts_snapshot`
+- `whereabouts_summary`
+- `cyberboss_sticker_tags`
+- `cyberboss_sticker_pick`
+- `cyberboss_sticker_send`
+- `cyberboss_sticker_delete`
+- `cyberboss_sticker_save_from_inbox`
 - `cyberboss_system_send`
 
 ### Agent 使用约定

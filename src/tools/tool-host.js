@@ -157,6 +157,117 @@ const PROJECT_TOOLS = [
     },
   },
   {
+    name: "cyberboss_sticker_tags",
+    description: "Load the current sticker tag catalog and tagging rules only when you have decided a sticker is needed or an inbox image should be saved as a sticker.",
+    shortHint: "Load sticker tags only when needed.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = await services.sticker.listTags();
+      return {
+        text: `Sticker tags loaded: ${Array.isArray(result.tags) ? result.tags.length : 0}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_sticker_pick",
+    description: "List a few saved sticker candidates for one sticker tag after you have decided a sticker would help.",
+    shortHint: "Pick sticker candidates by tag.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      required: ["tag"],
+      properties: {
+        tag: { type: "string", description: "Sticker tag such as 可爱, 无语, 躺平, 感动, or OK." },
+        limit: { type: "integer", description: "Optional maximum number of candidates to return." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.sticker.pick(args);
+      return {
+        text: `Sticker candidates loaded: ${result.candidates.length}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_sticker_send",
+    description: "Send a saved sticker back to the current WeChat chat by sticker id.",
+    shortHint: "Send a saved sticker by id.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      required: ["stickerId"],
+      properties: {
+        stickerId: { type: "string", description: "Sticker id such as stk_001." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = await services.sticker.sendToCurrentChat(args, context);
+      return {
+        text: `Sticker sent: ${result.stickerId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_sticker_delete",
+    description: "Delete a saved sticker by sticker id and remove its local GIF file.",
+    shortHint: "Delete a saved sticker by id.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      required: ["stickerId"],
+      properties: {
+        stickerId: { type: "string", description: "Sticker id such as stk_001." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = await services.sticker.deleteById(args, context);
+      return {
+        text: `Sticker deleted: ${result.stickerId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_sticker_save_from_inbox",
+    description: "Save one inbox image as a reusable sticker GIF after choosing 1-3 allowed tags and one short desc. If the sticker contains readable text, keep a short description and append that text in desc.",
+    shortHint: "Save a qualifying inbox image into the sticker library.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      required: ["filePath", "tags", "desc"],
+      properties: {
+        filePath: { type: "string", description: "Absolute inbox image path under ~/.cyberboss/inbox." },
+        tags: {
+          type: "array",
+          description: "One to three allowed sticker tags.",
+          items: { type: "string" },
+        },
+        desc: { type: "string", description: "One short sticker description. If readable text exists in the sticker, append that text after the description." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = await services.sticker.saveFromInbox(args, context);
+      return {
+        text: result.created ? `Sticker saved: ${result.stickerId}` : `Sticker already saved: ${result.stickerId}`,
+        data: result,
+      };
+    },
+  },
+  {
     name: "cyberboss_timeline_read",
     description: "Read the current timeline day data for a specific date. Use this before editing when the current day state is uncertain.",
     shortHint: "Read a timeline day before editing it.",

@@ -66,7 +66,11 @@ test("image attachments inject view_image instructions for runtimes that support
       receivedAt: "2026-04-17T10:00:00.000Z",
     }, "/workspace");
 
-    assert.match(prepared.text, /For images, use `view_image`/i);
+    assert.match(prepared.text, /Read images first\. Use `view_image`\./i);
+    assert.match(prepared.text, /Do not comment on an image before reading it/i);
+    assert.match(prepared.text, /cyberboss_sticker_save_from_inbox/i);
+    assert.match(prepared.text, /cyberboss_sticker_tags/i);
+    assert.match(prepared.text, /Do not explain your save steps/i);
     assert.doesNotMatch(prepared.text, /Do not use `Read` or shell commands on image files/i);
     assert.equal(prepared.attachments[0].contentType, "image/jpeg");
     assert.equal(prepared.attachments[0].isImage, true);
@@ -120,7 +124,11 @@ test("image attachments tell claudecode to use Read on the saved local image fil
     }, "/workspace");
 
     assert.match(prepared.text, /You must read these files before replying to User/i);
-    assert.match(prepared.text, /For images, use `Read` on the saved local image file/i);
+    assert.match(prepared.text, /Read images first\. Use `Read` on the saved local image file\./i);
+    assert.match(prepared.text, /Do not comment on an image before reading it/i);
+    assert.match(prepared.text, /cyberboss_sticker_save_from_inbox/i);
+    assert.match(prepared.text, /cyberboss_sticker_tags/i);
+    assert.match(prepared.text, /Do not explain your save steps/i);
     assert.doesNotMatch(prepared.text, /Do not use shell commands or wrappers/i);
     assert.doesNotMatch(prepared.text, /view_image/i);
     assert.equal(prepared.attachments[0].contentType, "image/jpeg");

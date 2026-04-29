@@ -151,6 +151,15 @@ CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
 CYBERBOSS_WEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c
 CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
+CYBERBOSS_ENABLE_LOCATION_SERVER=false
+CYBERBOSS_LOCATION_HOST=0.0.0.0
+CYBERBOSS_LOCATION_PORT=4318
+CYBERBOSS_LOCATION_TOKEN=
+CYBERBOSS_LOCATION_HOME_CENTER=
+CYBERBOSS_LOCATION_WORK_CENTER=
+CYBERBOSS_LOCATION_KNOWN_PLACES=
+CYBERBOSS_LOCATION_PLACE_RADIUS_METERS=150
+CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
 ```
 
 What these do:
@@ -179,6 +188,22 @@ What these do:
   Set the default minimum merge size for short WeChat reply chunks.
 - `CYBERBOSS_WEIXIN_BASE_URL`, `CYBERBOSS_WEIXIN_CDN_BASE_URL`, `CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   Override the WeChat bridge endpoints and QR bot type when your deployment needs it.
+- `CYBERBOSS_ENABLE_LOCATION_SERVER`
+  Enable the built-in whereabouts HTTP ingest server.
+- `CYBERBOSS_LOCATION_HOST`
+  Host for the built-in whereabouts HTTP server. Default is `0.0.0.0`.
+- `CYBERBOSS_LOCATION_PORT`
+  Port for the built-in whereabouts HTTP server. Default is `4318`.
+- `CYBERBOSS_LOCATION_TOKEN`
+  Bearer token used to upload location data.
+- `CYBERBOSS_LOCATION_HOME_CENTER`, `CYBERBOSS_LOCATION_WORK_CENTER`
+  Home and work center coordinates in `lat,lng` format.
+- `CYBERBOSS_LOCATION_KNOWN_PLACES`
+  Extra named places as a JSON array.
+- `CYBERBOSS_LOCATION_PLACE_RADIUS_METERS`
+  Radius for place-tag matching. Default is `150`.
+- `CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT`
+  Number of battery observations to retain. Default is `100`.
 
 Why this matters:
 
@@ -307,6 +332,14 @@ Common contents:
   WeChat long-poll synchronization buffers
 - `inbox/`
   saved incoming WeChat images and attachments
+- `stickers/`
+  sticker assets, including:
+  - `assets/`
+    saved sticker media, currently normalized to GIF
+  - `index.json`
+    sticker index mapping `stickerId -> { tags, desc }`
+  - `tags.json`
+    sticker tag catalog, editable by both the AI and the user
 - `weixin-instructions.md`
   local persona file generated on first run
 - `reminder-queue.json`
@@ -328,6 +361,29 @@ Common contents:
 
 This is the runtime state directory, not your project workspace. The WeChat thread and the terminal thread should still be opened against your actual project directory.
 
+### Whereabouts Notes
+
+- Cyberboss already bundles `whereabouts-mcp` and can ingest phone location, battery, and trigger context directly.
+- To enable the built-in whereabouts server, configure at least:
+  - `CYBERBOSS_ENABLE_LOCATION_SERVER=true`
+  - `CYBERBOSS_LOCATION_TOKEN=<your_token>`
+  - `CYBERBOSS_LOCATION_HOME_CENTER=lat,lng`
+- Common optional variables:
+  - `CYBERBOSS_LOCATION_HOST`
+  - `CYBERBOSS_LOCATION_WORK_CENTER`
+  - `CYBERBOSS_LOCATION_KNOWN_PLACES`
+  - `CYBERBOSS_LOCATION_PLACE_RADIUS_METERS`
+  - `CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT`
+- The built-in server listens on `http://0.0.0.0:4318` by default. The ingest endpoint is `POST /location/ingest`, and health checks use `GET /healthz`.
+- Whereabouts data is stored in `${HOME}/.cyberboss/locations.json`, not in your project directory.
+
+### Sticker Notes
+
+- On the current WeChat bridge path, do not rely on animated playback for inbound or outbound stickers. A GIF may still show up as a static image in chat.
+- Because of that, saved stickers are currently normalized to GIF at intake so the asset format is already aligned if WeChat later opens a fuller sticker capability.
+- The tag catalog lives at `${HOME}/.cyberboss/stickers/tags.json`. The AI reads from it, and users can edit it directly.
+- For now, sticker retrieval is tag-filtered only. There is no vector-database recall layer.
+
 <a id="agent-guide"></a>
 ## Agent Guide
 
@@ -343,6 +399,16 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 - `cyberboss_timeline_dev`
 - `cyberboss_timeline_screenshot`
 - `cyberboss_channel_send_file`
+- `whereabouts_current_stay`
+- `whereabouts_recent_stays`
+- `whereabouts_recent_moves`
+- `whereabouts_snapshot`
+- `whereabouts_summary`
+- `cyberboss_sticker_tags`
+- `cyberboss_sticker_pick`
+- `cyberboss_sticker_send`
+- `cyberboss_sticker_delete`
+- `cyberboss_sticker_save_from_inbox`
 - `cyberboss_system_send`
 
 ### Agent conventions
