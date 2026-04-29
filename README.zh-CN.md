@@ -308,6 +308,10 @@ npm run shared:open
 
 - `npm run shared:status`
 
+如果你想在手机上通过 `Termius + tmux` 长期查看共享线程，参考：
+
+- [docs/termius-tmux-shared-terminal.zh-CN.md](docs/termius-tmux-shared-terminal.zh-CN.md)
+
 注意：
 
 - 共享启动就是默认启动方式；README 里的所有正常使用场景都默认建立在 `npm run shared:start` / `npm run shared:open` 之上
