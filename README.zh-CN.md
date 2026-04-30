@@ -419,6 +419,7 @@ ${HOME}/.cyberboss
 - `cyberboss_sticker_send`
 - `cyberboss_sticker_delete`
 - `cyberboss_sticker_save_from_inbox`
+- `cyberboss_sticker_update`
 - `cyberboss_system_send`
 
 ### Agent 使用约定

@@ -98,77 +98,149 @@ test("sticker service exposes the current tag catalog on demand", async () => {
 
   assert.equal(Array.isArray(result.tags), true);
   assert.equal(result.tags.includes("可爱"), true);
+  assert.match(result.guidance, /short new tag/i);
   assert.match(result.guidance, /desc/i);
 });
 
-test("sticker service saves inbox images as GIF stickers, dedupes, and notifies once", async () => {
+test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, and notifies once", async () => {
   const config = createConfig();
   const { service, sentTexts } = createService(config);
   const inboxPath = writeInboxPng(config, "cat.png");
 
   const first = await service.saveFromInbox({
-    filePath: inboxPath,
-    tags: ["可爱", "爱"],
-    desc: "小猫贴脸蹭蹭，撒娇示爱",
+    items: [{
+      filePath: inboxPath,
+      tags: ["可爱", "夸夸"],
+      desc: "小猫贴脸蹭蹭，撒娇示爱",
+    }],
   }, {
     senderId: "user-1",
   });
+  const firstItem = first.results[0];
 
-  assert.equal(first.created, true);
-  assert.equal(path.extname(first.filePath), ".gif");
-  assert.ok(fs.existsSync(first.filePath));
-  assert.equal(loadStickerIndexSync(config)[first.stickerId].desc, "小猫贴脸蹭蹭，撒娇示爱");
+  assert.equal(first.createdCount, 1);
+  assert.equal(firstItem.created, true);
+  assert.equal(path.extname(firstItem.filePath), ".gif");
+  assert.ok(fs.existsSync(firstItem.filePath));
+  assert.equal(loadStickerIndexSync(config)[firstItem.stickerId].desc, "小猫贴脸蹭蹭，撒娇示爱");
+  assert.equal(loadStickerIndexSync(config)[firstItem.stickerId].tags.includes("夸夸"), true);
+  assert.equal(loadStickerTagsSync(config).includes("夸夸"), true);
   assert.equal(sentTexts.length, 1);
   assert.match(sentTexts[0].text, /^✅ 系统提示:/);
   assert.match(sentTexts[0].text, /表情包已保存/);
   assert.match(sentTexts[0].text, /如不需要添加该表情包,请让AI删除/);
 
   const second = await service.saveFromInbox({
-    filePath: inboxPath,
-    tags: ["可爱"],
-    desc: "重复的小猫",
+    items: [{
+      filePath: inboxPath,
+      tags: ["可爱"],
+      desc: "重复的小猫",
+    }],
+  }, {
+    senderId: "user-1",
+  });
+  const secondItem = second.results[0];
+
+  assert.equal(second.createdCount, 0);
+  assert.equal(secondItem.created, false);
+  assert.equal(secondItem.deduped, true);
+  assert.equal(secondItem.stickerId, firstItem.stickerId);
+  assert.equal(sentTexts.length, 1);
+});
+
+test("sticker service saves inbox images from an items array and keeps the tag catalog deduped", async () => {
+  const config = createConfig();
+  const { service, sentTexts } = createService(config);
+  const inboxPathA = writeInboxPng(config, "batch-a.png");
+  const inboxPathB = writeInboxPng(config, "batch-b.png");
+
+  const batch = await service.saveFromInbox({
+    items: [{
+      filePath: inboxPathA,
+      tags: ["可爱", "新梗"],
+      desc: "小猫歪头卖萌",
+    }, {
+      filePath: inboxPathB,
+      tags: ["新梗"],
+      desc: "同一张图再次发送",
+    }],
   }, {
     senderId: "user-1",
   });
 
-  assert.equal(second.created, false);
-  assert.equal(second.deduped, true);
-  assert.equal(second.stickerId, first.stickerId);
+  assert.equal(batch.createdCount, 1);
+  assert.equal(batch.dedupedCount, 1);
+  assert.equal(batch.results.length, 2);
+  assert.equal(loadStickerTagsSync(config).filter((tag) => tag === "新梗").length, 1);
   assert.equal(sentTexts.length, 1);
 });
 
-test("sticker service picks, sends, and deletes saved stickers", async () => {
+test("sticker service rejects batch saves larger than 10 items", async () => {
+  const config = createConfig();
+  const { service } = createService(config);
+  const items = Array.from({ length: 11 }, (_, index) => ({
+    filePath: writeInboxPng(config, `oversize-${index}.png`),
+    tags: ["可爱"],
+    desc: `第${index + 1}张`,
+  }));
+
+  await assert.rejects(async () => {
+    await service.saveFromInbox({ items });
+  }, /Sticker save batch size must be 10 or less\./);
+});
+
+test("sticker service updates, picks, sends, and deletes saved stickers", async () => {
   const config = createConfig();
   const { service, sentTexts, sentFiles } = createService(config);
   const inboxPath = writeInboxPng(config, "smile.png");
   const saved = await service.saveFromInbox({
-    filePath: inboxPath,
-    tags: ["开心", "大笑"],
-    desc: "笑到停不下来",
+    items: [{
+      filePath: inboxPath,
+      tags: ["开心", "大笑"],
+      desc: "笑到停不下来",
+    }],
   }, {
     senderId: "user-1",
   });
+  const savedItem = saved.results[0];
+
+  const updated = await service.update({
+    items: [{
+      stickerId: savedItem.stickerId,
+      tags: ["开心", "新标签"],
+      desc: "笑到拍桌，还写着哈哈哈",
+    }],
+  });
+  assert.equal(updated.updatedCount, 1);
+  assert.deepEqual(loadStickerIndexSync(config)[savedItem.stickerId], {
+    tags: ["开心", "新标签"],
+    desc: "笑到拍桌，还写着哈哈哈",
+  });
+  assert.equal(loadStickerTagsSync(config).includes("新标签"), true);
 
   const picked = await service.pick({ tag: "开心", limit: 3 });
   assert.equal(picked.candidates.length, 1);
-  assert.equal(picked.candidates[0].stickerId, saved.stickerId);
+  assert.equal(picked.candidates[0].stickerId, savedItem.stickerId);
 
   const delivery = await service.sendToCurrentChat({
-    stickerId: saved.stickerId,
+    stickerId: savedItem.stickerId,
   }, {
     senderId: "user-1",
   });
-  assert.equal(delivery.stickerId, saved.stickerId);
+  assert.equal(delivery.stickerId, savedItem.stickerId);
   assert.equal(sentFiles.length, 1);
-  assert.equal(sentFiles[0].args.filePath, saved.filePath);
+  assert.equal(sentFiles[0].args.filePath, savedItem.filePath);
 
-  const deleted = await service.deleteById({
-    stickerId: saved.stickerId,
+  const deleted = await service.delete({
+    items: [{
+      stickerId: savedItem.stickerId,
+    }],
   }, {
     senderId: "user-1",
   });
-  assert.equal(deleted.deleted, true);
-  assert.equal(loadStickerIndexSync(config)[saved.stickerId], undefined);
-  assert.equal(fs.existsSync(saved.filePath), false);
+  assert.equal(deleted.deletedCount, 1);
+  assert.equal(loadStickerIndexSync(config)[savedItem.stickerId], undefined);
+  assert.equal(fs.existsSync(savedItem.filePath), false);
+  assert.match(sentTexts[sentTexts.length - 1].text, /^❌ 系统提示:/);
   assert.match(sentTexts[sentTexts.length - 1].text, /表情包已删除/);
 });

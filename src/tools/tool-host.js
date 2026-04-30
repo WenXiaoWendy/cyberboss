@@ -1,4 +1,9 @@
 const { WhereaboutsToolHost } = require("whereabouts-mcp");
+const {
+  STICKER_DESC_GUIDANCE,
+  STICKER_DESC_FIELD_DESCRIPTION,
+  STICKER_TAG_GUIDANCE,
+} = require("../services/sticker-service");
 
 class ProjectToolHost {
   constructor({ services, runtimeContextStore }) {
@@ -158,7 +163,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_sticker_tags",
-    description: "Load the current sticker tag catalog and tagging rules only when you have decided a sticker is needed or an inbox image should be saved as a sticker.",
+    description: `Load the current sticker tag catalog and tagging rules only when you have decided a sticker is needed or an inbox image should be saved as a sticker. ${STICKER_TAG_GUIDANCE}`,
     shortHint: "Load sticker tags only when needed.",
     topics: ["sticker"],
     inputSchema: {
@@ -220,49 +225,110 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_sticker_delete",
-    description: "Delete a saved sticker by sticker id and remove its local GIF file.",
-    shortHint: "Delete a saved sticker by id.",
+    description: "Delete one or more saved stickers by sticker id and remove their local GIF files.",
+    shortHint: "Delete saved stickers by id array.",
     topics: ["sticker"],
     inputSchema: {
       type: "object",
-      required: ["stickerId"],
+      required: ["items"],
       properties: {
-        stickerId: { type: "string", description: "Sticker id such as stk_001." },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["stickerId"],
+            properties: {
+              stickerId: { type: "string", description: "Sticker id such as stk_001." },
+            },
+            additionalProperties: false,
+          },
+        },
       },
       additionalProperties: false,
     },
     async handler({ services, args, context }) {
-      const result = await services.sticker.deleteById(args, context);
+      const result = await services.sticker.delete(args, context);
       return {
-        text: `Sticker deleted: ${result.stickerId}`,
+        text: `Sticker batch deleted: ${result.deletedCount}.`,
         data: result,
       };
     },
   },
   {
     name: "cyberboss_sticker_save_from_inbox",
-    description: "Save one inbox image as a reusable sticker GIF after choosing 1-3 allowed tags and one short desc. If the sticker contains readable text, keep a short description and append that text in desc.",
-    shortHint: "Save a qualifying inbox image into the sticker library.",
+    description: `Save one or more inbox images as reusable sticker GIFs after reading them all. Use an items array even for one sticker. ${STICKER_TAG_GUIDANCE} ${STICKER_DESC_GUIDANCE}`,
+    shortHint: "Save inbox stickers with an items array.",
     topics: ["sticker"],
     inputSchema: {
       type: "object",
-      required: ["filePath", "tags", "desc"],
+      required: ["items"],
       properties: {
-        filePath: { type: "string", description: "Absolute inbox image path under ~/.cyberboss/inbox." },
-        tags: {
+        items: {
           type: "array",
-          description: "One to three allowed sticker tags.",
-          items: { type: "string" },
+          description: "One to ten inbox stickers to save in one call.",
+          items: {
+            type: "object",
+            required: ["filePath", "tags", "desc"],
+            properties: {
+              filePath: { type: "string", description: "Absolute inbox image path under ~/.cyberboss/inbox." },
+              tags: {
+                type: "array",
+                description: "One to three sticker tags. New short tags are allowed when the current catalog does not fit.",
+                items: { type: "string" },
+              },
+              desc: { type: "string", description: STICKER_DESC_FIELD_DESCRIPTION },
+            },
+            additionalProperties: false,
+          },
         },
-        desc: { type: "string", description: "One short sticker description. If readable text exists in the sticker, append that text after the description." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
       },
       additionalProperties: false,
     },
     async handler({ services, args, context }) {
       const result = await services.sticker.saveFromInbox(args, context);
+      const duplicateNote = result.dedupedCount > 0
+        ? " Existing stickers usually mean the user only sent them for you to see. Do not mention duplicates; just reply normally."
+        : "";
       return {
-        text: result.created ? `Sticker saved: ${result.stickerId}` : `Sticker already saved: ${result.stickerId}`,
+        text: `Sticker batch processed: ${result.createdCount} saved, ${result.dedupedCount} already existed.${duplicateNote}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_sticker_update",
+    description: `Overwrite tags and desc for one or more saved stickers. Use an items array even for one sticker. ${STICKER_TAG_GUIDANCE} ${STICKER_DESC_GUIDANCE}`,
+    shortHint: "Overwrite stickers with an items array.",
+    topics: ["sticker"],
+    inputSchema: {
+      type: "object",
+      required: ["items"],
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["stickerId", "tags", "desc"],
+            properties: {
+              stickerId: { type: "string", description: "Sticker id such as stk_001." },
+              tags: {
+                type: "array",
+                description: "One to three sticker tags. New short tags are allowed when needed.",
+                items: { type: "string" },
+              },
+              desc: { type: "string", description: STICKER_DESC_FIELD_DESCRIPTION },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.sticker.update(args);
+      return {
+        text: `Sticker batch updated: ${result.updatedCount}.`,
         data: result,
       };
     },

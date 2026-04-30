@@ -66,11 +66,13 @@ test("image attachments inject view_image instructions for runtimes that support
       receivedAt: "2026-04-17T10:00:00.000Z",
     }, "/workspace");
 
-    assert.match(prepared.text, /Read images first\. Use `view_image`\./i);
-    assert.match(prepared.text, /Do not comment on an image before reading it/i);
+    assert.match(prepared.text, /Read every image first with `view_image`\./i);
+    assert.match(prepared.text, /Say nothing before reading/i);
     assert.match(prepared.text, /cyberboss_sticker_save_from_inbox/i);
+    assert.match(prepared.text, /`items` array/i);
     assert.match(prepared.text, /cyberboss_sticker_tags/i);
-    assert.match(prepared.text, /Do not explain your save steps/i);
+    assert.match(prepared.text, /short new tag/i);
+    assert.match(prepared.text, /Do not describe save steps/i);
     assert.doesNotMatch(prepared.text, /Do not use `Read` or shell commands on image files/i);
     assert.equal(prepared.attachments[0].contentType, "image/jpeg");
     assert.equal(prepared.attachments[0].isImage, true);
@@ -123,12 +125,14 @@ test("image attachments tell claudecode to use Read on the saved local image fil
       receivedAt: "2026-04-17T10:00:00.000Z",
     }, "/workspace");
 
-    assert.match(prepared.text, /You must read these files before replying to User/i);
-    assert.match(prepared.text, /Read images first\. Use `Read` on the saved local image file\./i);
-    assert.match(prepared.text, /Do not comment on an image before reading it/i);
+    assert.match(prepared.text, /Read them before replying to User/i);
+    assert.match(prepared.text, /Read every image first with `Read`\./i);
+    assert.match(prepared.text, /Say nothing before reading/i);
     assert.match(prepared.text, /cyberboss_sticker_save_from_inbox/i);
+    assert.match(prepared.text, /`items` array/i);
     assert.match(prepared.text, /cyberboss_sticker_tags/i);
-    assert.match(prepared.text, /Do not explain your save steps/i);
+    assert.match(prepared.text, /short new tag/i);
+    assert.match(prepared.text, /Do not describe save steps/i);
     assert.doesNotMatch(prepared.text, /Do not use shell commands or wrappers/i);
     assert.doesNotMatch(prepared.text, /view_image/i);
     assert.equal(prepared.attachments[0].contentType, "image/jpeg");
@@ -136,6 +140,299 @@ test("image attachments tell claudecode to use Read on the saved local image fil
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("image-only inbound turns enter the dedicated debounce queue", async () => {
+  const queued = [];
+  let routed = 0;
+  await CyberbossApp.prototype.handlePreparedMessage.call({
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          buildBindingKey() {
+            return "binding-1";
+          },
+        };
+      },
+    },
+    streamDelivery: {
+      setReplyTarget() {},
+    },
+    resolveWorkspaceRoot() {
+      return "/workspace";
+    },
+    async prepareIncomingMessageForRuntime() {
+      return {
+        workspaceId: "default",
+        accountId: "wx-account",
+        senderId: "user-1",
+        contextToken: "ctx-1",
+        provider: "weixin",
+        originalText: "",
+        text: "image prompt",
+        attachments: [{
+          kind: "image",
+          contentType: "image/jpeg",
+          isImage: true,
+          absolutePath: "/tmp/a.jpg",
+        }],
+        attachmentFailures: [],
+        receivedAt: "2026-04-30T10:00:00.000Z",
+      };
+    },
+    isTurnDispatchBlocked() {
+      return false;
+    },
+    enqueuePendingImageInbound(payload) {
+      queued.push(payload);
+    },
+    async routePreparedInbound() {
+      routed += 1;
+    },
+  }, {
+    workspaceId: "default",
+    accountId: "wx-account",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+    text: "",
+    attachments: [],
+  }, {
+    allowCommands: false,
+  });
+
+  assert.equal(queued.length, 1);
+  assert.equal(routed, 0);
+});
+
+test("debounced image batches merge with a trailing text message into one prepared turn", async () => {
+  const scopeKey = "binding-1::/workspace";
+  let routed = null;
+  const app = {
+    config: {
+      userName: "User",
+    },
+    pendingImageInboundByScope: new Map([[scopeKey, {
+      bindingKey: "binding-1",
+      workspaceRoot: "/workspace",
+      messages: [{
+        senderId: "user-1",
+        accountId: "wx-account",
+        workspaceId: "default",
+        provider: "weixin",
+        contextToken: "ctx-1",
+        originalText: "",
+        text: "image prompt 1",
+        attachments: [{
+          kind: "image",
+          contentType: "image/jpeg",
+          isImage: true,
+          absolutePath: "/tmp/a.jpg",
+        }],
+        attachmentFailures: [],
+        receivedAt: "2026-04-30T10:00:00.000Z",
+      }, {
+        senderId: "user-1",
+        accountId: "wx-account",
+        workspaceId: "default",
+        provider: "weixin",
+        contextToken: "ctx-1",
+        originalText: "",
+        text: "image prompt 2",
+        attachments: [{
+          kind: "image",
+          contentType: "image/png",
+          isImage: true,
+          absolutePath: "/tmp/b.png",
+        }],
+        attachmentFailures: [],
+        receivedAt: "2026-04-30T10:00:01.000Z",
+      }],
+      timer: null,
+    }]]),
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+    },
+    clearPendingImageInboundTimer: CyberbossApp.prototype.clearPendingImageInboundTimer,
+    async routePreparedInbound({ prepared }) {
+      routed = prepared;
+      return true;
+    },
+  };
+
+  await CyberbossApp.prototype.flushPendingImageInboundBatch.call(app, {
+    bindingKey: "binding-1",
+    workspaceRoot: "/workspace",
+    trailingPrepared: {
+      senderId: "user-1",
+      accountId: "wx-account",
+      workspaceId: "default",
+      provider: "weixin",
+      contextToken: "ctx-2",
+      originalText: "这是补充文字",
+      text: "text prompt",
+      attachments: [],
+      attachmentFailures: [],
+      receivedAt: "2026-04-30T10:00:02.000Z",
+    },
+  });
+
+  assert.ok(routed);
+  assert.equal(routed.attachments.length, 2);
+  assert.equal(routed.contextToken, "ctx-2");
+  assert.match(routed.originalText, /这是补充文字/);
+  assert.match(routed.text, /这是补充文字/);
+  assert.equal((routed.text.match(/Say nothing before reading/g) || []).length, 1);
+});
+
+test("debounced image batches still hand off to the normal pending buffer when the runtime is blocked", async () => {
+  const scopeKey = "binding-1::/workspace";
+  const buffered = [];
+  const app = {
+    pendingImageInboundByScope: new Map([[scopeKey, {
+      bindingKey: "binding-1",
+      workspaceRoot: "/workspace",
+      messages: [{
+        senderId: "user-1",
+        accountId: "wx-account",
+        workspaceId: "default",
+        provider: "weixin",
+        contextToken: "ctx-1",
+        originalText: "",
+        text: "image prompt",
+        attachments: [{
+          kind: "image",
+          contentType: "image/jpeg",
+          isImage: true,
+          absolutePath: "/tmp/a.jpg",
+        }],
+        attachmentFailures: [],
+        receivedAt: "2026-04-30T10:00:00.000Z",
+      }],
+      timer: null,
+    }]]),
+    config: {
+      userName: "User",
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+    },
+    isTurnDispatchBlocked() {
+      return true;
+    },
+    bufferPendingInboundMessage(payload) {
+      buffered.push(payload);
+    },
+    async dispatchPreparedTurn() {
+      throw new Error("should not dispatch while blocked");
+    },
+    clearPendingImageInboundTimer: CyberbossApp.prototype.clearPendingImageInboundTimer,
+    routePreparedInbound: CyberbossApp.prototype.routePreparedInbound,
+  };
+
+  await CyberbossApp.prototype.flushPendingImageInboundBatch.call(app, {
+    bindingKey: "binding-1",
+    workspaceRoot: "/workspace",
+  });
+
+  assert.equal(buffered.length, 1);
+  assert.equal(buffered[0].prepared.attachments.length, 1);
+});
+
+test("pending image-only inbox messages merge into one read prompt", () => {
+  const merged = CyberbossApp.prototype.mergePendingInboundDraft.call({
+    config: {
+      userName: "User",
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+    },
+  }, {
+    bindingKey: "binding-1",
+    workspaceRoot: "/workspace",
+    messages: [{
+      senderId: "user-1",
+      accountId: "wx-account",
+      workspaceId: "default",
+      provider: "weixin",
+      contextToken: "ctx-1",
+      originalText: "",
+      text: "old image prompt 1",
+      attachments: [{
+        kind: "image",
+        contentType: "image/jpeg",
+        isImage: true,
+        absolutePath: "/tmp/a.jpg",
+      }],
+      attachmentFailures: [],
+      receivedAt: "2026-04-30T10:00:00.000Z",
+    }, {
+      senderId: "user-1",
+      accountId: "wx-account",
+      workspaceId: "default",
+      provider: "weixin",
+      contextToken: "ctx-1",
+      originalText: "",
+      text: "old image prompt 2",
+      attachments: [{
+        kind: "image",
+        contentType: "image/png",
+        isImage: true,
+        absolutePath: "/tmp/b.png",
+      }],
+      attachmentFailures: [],
+      receivedAt: "2026-04-30T10:00:01.000Z",
+    }],
+  });
+
+  assert.equal(merged.prepared.attachments.length, 2);
+  assert.equal(merged.remainingMessages.length, 0);
+  assert.match(merged.prepared.text, /Saved attachments:/i);
+  assert.match(merged.prepared.text, /cyberboss_sticker_save_from_inbox/i);
+  assert.match(merged.prepared.text, /`items` array/i);
+  assert.equal((merged.prepared.text.match(/Say nothing before reading/g) || []).length, 1);
+});
+
+test("pending image-only inbox messages are split into batches of 10 attachments", () => {
+  const merged = CyberbossApp.prototype.mergePendingInboundDraft.call({
+    config: {
+      userName: "User",
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+    },
+  }, {
+    bindingKey: "binding-1",
+    workspaceRoot: "/workspace",
+    messages: [{
+      senderId: "user-1",
+      accountId: "wx-account",
+      workspaceId: "default",
+      provider: "weixin",
+      contextToken: "ctx-1",
+      originalText: "",
+      text: "old image prompt",
+      attachments: Array.from({ length: 12 }, (_, index) => ({
+        kind: "image",
+        contentType: "image/jpeg",
+        isImage: true,
+        absolutePath: `/tmp/${index + 1}.jpg`,
+      })),
+      attachmentFailures: [],
+      receivedAt: "2026-04-30T10:00:00.000Z",
+    }],
+  });
+
+  assert.equal(merged.prepared.attachments.length, 10);
+  assert.equal(merged.remainingMessages.length, 1);
+  assert.equal(merged.remainingMessages[0].attachments.length, 2);
 });
 
 test("location arrive_home trigger enqueues a system action message", () => {

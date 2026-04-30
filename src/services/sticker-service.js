@@ -13,6 +13,12 @@ const { resolvePreferredSenderId } = require("../core/default-targets");
 const execFileAsync = promisify(execFile);
 const DEFAULT_PICK_LIMIT = 5;
 const MAX_PICK_LIMIT = 20;
+const MAX_STICKER_SAVE_BATCH_SIZE = 10;
+const MAX_STICKER_MUTATION_BATCH_SIZE = 50;
+const MIN_STICKER_DESC_CHARS = 16;
+const STICKER_TAG_GUIDANCE = "Reuse existing tags when they fit. Otherwise create short new tags; new tags are added to the tag list.";
+const STICKER_DESC_GUIDANCE = `Prefer descs of ${MIN_STICKER_DESC_CHARS} or more characters. If readable text exists, append it after the short scene description.`;
+const STICKER_DESC_FIELD_DESCRIPTION = `A concrete sticker description. ${STICKER_DESC_GUIDANCE}`;
 
 class StickerService {
   constructor({ config, channelAdapter, sessionStore, channelFileService }) {
@@ -26,95 +32,58 @@ class StickerService {
     ensureStickerCatalogFilesSync(this.config);
     return {
       tags: loadStickerTagsSync(this.config),
-      guidance: "Choose 1-3 tags. Use short tags only. If the sticker contains readable text, keep a short scene description and append the sticker text in desc.",
+      guidance: `Choose 1-3 short tags. ${STICKER_TAG_GUIDANCE} Make desc concrete enough to identify the sticker. ${STICKER_DESC_GUIDANCE}`,
     };
   }
 
-  async saveFromInbox({ filePath = "", tags = [], desc = "", userId = "" } = {}, context = {}) {
+  async saveFromInbox({ items = [], userId = "" } = {}, context = {}) {
     ensureStickerCatalogFilesSync(this.config);
-    const resolvedInputPath = path.resolve(normalizeText(filePath));
-    if (!resolvedInputPath) {
-      throw new Error("Missing sticker inbox file path.");
-    }
-    if (!fs.existsSync(resolvedInputPath)) {
-      throw new Error(`Sticker inbox file does not exist: ${resolvedInputPath}`);
-    }
-    if (!isUnderDirectory(resolvedInputPath, buildStickerPaths(this.config).inboxDir)) {
-      throw new Error(`Sticker inbox file must be under ${buildStickerPaths(this.config).inboxDir}`);
-    }
-    const stat = fs.statSync(resolvedInputPath);
-    if (!stat.isFile()) {
-      throw new Error(`Sticker inbox file must be a file: ${resolvedInputPath}`);
-    }
+    const normalizedItems = normalizeStickerSaveItems(items, this.config);
+    const index = loadStickerIndexSync(this.config);
+    const tagCatalog = loadStickerTagsSync(this.config);
+    const hashByStickerId = buildStickerHashIndex(this.config, index);
+    const createdPaths = [];
+    const results = [];
 
-    const normalizedDesc = normalizeText(desc);
-    if (!normalizedDesc) {
-      throw new Error("Sticker description is required.");
-    }
-    const allowedTags = loadStickerTagsSync(this.config);
-    const normalizedTags = normalizeStickerTags(tags, allowedTags);
-
-    const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cyberboss-sticker-save-"));
-    const normalizedGifPath = path.join(tempDir, "normalized.gif");
     try {
-      await normalizeStickerGif({
-        inputPath: resolvedInputPath,
-        outputPath: normalizedGifPath,
-        scriptPath: this.config.stickerNormalizeGifScript,
-      });
-      const normalizedBuffer = await fsp.readFile(normalizedGifPath);
-      const index = loadStickerIndexSync(this.config);
-      const duplicate = findDuplicateStickerByBuffer(this.config, index, normalizedBuffer);
-      if (duplicate) {
-        return {
-          stickerId: duplicate.stickerId,
-          filePath: duplicate.filePath,
-          created: false,
-          deduped: true,
-          tags: index[duplicate.stickerId]?.tags || [],
-          desc: index[duplicate.stickerId]?.desc || "",
-        };
+      for (const item of normalizedItems) {
+        const saved = await saveStickerEntry({
+          config: this.config,
+          index,
+          tagCatalog,
+          hashByStickerId,
+          item,
+        });
+        results.push(saved.result);
+        if (saved.createdPath) {
+          createdPaths.push(saved.createdPath);
+        }
       }
 
-      const stickerId = allocateNextStickerId(index);
-      const stickerPath = resolveStickerFilePath(this.config, stickerId);
-      await fsp.mkdir(path.dirname(stickerPath), { recursive: true });
-      await fsp.copyFile(normalizedGifPath, stickerPath);
-
-      const nextIndex = {
-        ...index,
-        [stickerId]: {
-          tags: normalizedTags,
-          desc: normalizedDesc,
-        },
-      };
-      try {
-        await writeJsonFile(this.config.stickersIndexFile, nextIndex);
-      } catch (error) {
-        await fsp.rm(stickerPath, { force: true }).catch(() => {});
-        throw error;
-      }
-
-      await this.sendContextText({
-        text: buildStickerSavedText({
-          stickerId,
-          tags: normalizedTags,
-          desc: normalizedDesc,
-        }),
-        userId,
-        context,
+      const createdCount = results.filter((item) => item.created).length;
+      if (createdCount > 0) {
+        await writeJsonFile(this.config.stickersIndexFile, index);
+        await writeJsonFile(this.config.stickerTagsFile, tagCatalog);
+        for (const item of results) {
+          if (!item.created) {
+            continue;
+          }
+          await this.sendContextText({
+            text: buildStickerSavedText(item),
+            userId,
+            context,
       });
+    }
+  }
 
       return {
-        stickerId,
-        filePath: stickerPath,
-        created: true,
-        deduped: false,
-        tags: normalizedTags,
-        desc: normalizedDesc,
+        results,
+        createdCount,
+        dedupedCount: results.filter((item) => item.deduped).length,
       };
-    } finally {
-      await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    } catch (error) {
+      await Promise.all(createdPaths.map((filePath) => fsp.rm(filePath, { force: true }).catch(() => {})));
+      throw error;
     }
   }
 
@@ -168,32 +137,71 @@ class StickerService {
     };
   }
 
-  async deleteById({ stickerId = "" } = {}, context = {}) {
+  async delete({ items = [] } = {}, context = {}) {
     ensureStickerCatalogFilesSync(this.config);
-    const normalizedStickerId = normalizeStickerId(stickerId);
-    if (!normalizedStickerId) {
-      throw new Error("Sticker id is required.");
-    }
     const index = loadStickerIndexSync(this.config);
-    if (!index[normalizedStickerId]) {
-      throw new Error(`Sticker not found: ${normalizedStickerId}`);
+    const normalizedItems = normalizeStickerDeleteItems(items);
+    const normalizedStickerIds = normalizedItems.map((item) => item.stickerId);
+    for (const stickerId of normalizedStickerIds) {
+      if (!index[stickerId]) {
+        throw new Error(`Sticker not found: ${stickerId}`);
+      }
     }
     const nextIndex = { ...index };
-    delete nextIndex[normalizedStickerId];
+    for (const stickerId of normalizedStickerIds) {
+      delete nextIndex[stickerId];
+    }
     await writeJsonFile(this.config.stickersIndexFile, nextIndex);
 
-    const filePath = resolveStickerFilePath(this.config, normalizedStickerId);
-    await fsp.rm(filePath, { force: true }).catch(() => {});
+    const results = [];
+    for (const stickerId of normalizedStickerIds) {
+      const filePath = resolveStickerFilePath(this.config, stickerId);
+      await fsp.rm(filePath, { force: true }).catch(() => {});
+      results.push({
+        stickerId,
+        filePath,
+        deleted: true,
+      });
+    }
 
     await this.sendContextText({
-      text: buildStickerDeletedText(normalizedStickerId),
+      text: buildStickerDeletedText(normalizedStickerIds),
       context,
     });
 
     return {
-      stickerId: normalizedStickerId,
-      filePath,
-      deleted: true,
+      results,
+      deletedCount: results.length,
+    };
+  }
+
+  async update({ items = [] } = {}) {
+    ensureStickerCatalogFilesSync(this.config);
+    const index = loadStickerIndexSync(this.config);
+    const normalizedItems = normalizeStickerUpdateItems(items);
+    for (const item of normalizedItems) {
+      if (!index[item.stickerId]) {
+        throw new Error(`Sticker not found: ${item.stickerId}`);
+      }
+    }
+    const tagCatalog = loadStickerTagsSync(this.config);
+    for (const item of normalizedItems) {
+      index[item.stickerId] = {
+        tags: item.tags,
+        desc: item.desc,
+      };
+      tagCatalog.splice(0, tagCatalog.length, ...mergeStickerTagCatalog(tagCatalog, item.tags));
+    }
+    await writeJsonFile(this.config.stickersIndexFile, index);
+    await writeJsonFile(this.config.stickerTagsFile, tagCatalog);
+    return {
+      results: normalizedItems.map((item) => ({
+        stickerId: item.stickerId,
+        tags: item.tags,
+        desc: item.desc,
+        updated: true,
+      })),
+      updatedCount: normalizedItems.length,
     };
   }
 
@@ -289,7 +297,7 @@ function loadStickerTagsSync(config = {}) {
     const raw = fs.readFileSync(buildStickerPaths(config).stickerTagsFile, "utf8");
     const parsed = JSON.parse(raw);
     const normalized = Array.isArray(parsed)
-      ? parsed.map((value) => normalizeText(value)).filter(Boolean)
+      ? Array.from(new Set(parsed.map((value) => normalizeText(value)).filter(Boolean)))
       : [];
     return normalized.length ? normalized : loadStickerTagsTemplateSync(config);
   } catch {
@@ -326,7 +334,7 @@ function ensureFileFromTemplateSync(targetPath, templatePath, fallbackContent) {
   fs.writeFileSync(targetPath, fallbackContent, "utf8");
 }
 
-function normalizeStickerTags(tags, allowedTags) {
+function normalizeStickerTags(tags) {
   if (!Array.isArray(tags)) {
     throw new Error("Sticker tags must be an array.");
   }
@@ -334,11 +342,13 @@ function normalizeStickerTags(tags, allowedTags) {
   if (normalized.length < 1 || normalized.length > 3) {
     throw new Error("Sticker tags must contain 1 to 3 labels.");
   }
-  const allowedSet = new Set(Array.isArray(allowedTags) ? allowedTags : []);
-  for (const tag of normalized) {
-    if (!allowedSet.has(tag)) {
-      throw new Error(`Sticker tag is not allowed: ${tag}`);
-    }
+  return normalized;
+}
+
+function normalizeStickerDesc(desc) {
+  const normalized = normalizeText(desc);
+  if (!normalized) {
+    throw new Error("Sticker description is required.");
   }
   return normalized;
 }
@@ -360,20 +370,29 @@ function allocateNextStickerId(index = {}) {
   return `stk_${String(max + 1).padStart(3, "0")}`;
 }
 
-function findDuplicateStickerByBuffer(config = {}, index = {}, buffer) {
-  const targetHash = computeBufferHash(buffer);
+function buildStickerHashIndex(config = {}, index = {}) {
+  const hashByStickerId = new Map();
   for (const stickerId of Object.keys(index)) {
     const filePath = resolveStickerFilePath(config, stickerId);
     if (!fs.existsSync(filePath)) {
       continue;
     }
     try {
-      const currentHash = computeBufferHash(fs.readFileSync(filePath));
-      if (currentHash === targetHash) {
-        return { stickerId, filePath };
-      }
+      hashByStickerId.set(stickerId, computeBufferHash(fs.readFileSync(filePath)));
     } catch {
       // Ignore unreadable sticker files during duplicate checks.
+    }
+  }
+  return hashByStickerId;
+}
+
+function findDuplicateStickerByHash(config = {}, index = {}, hashByStickerId = new Map(), targetHash = "") {
+  for (const stickerId of Object.keys(index)) {
+    if (hashByStickerId.get(stickerId) === targetHash) {
+      return {
+        stickerId,
+        filePath: resolveStickerFilePath(config, stickerId),
+      };
     }
   }
   return null;
@@ -414,10 +433,183 @@ function buildStickerSavedText({ stickerId, tags, desc }) {
   ].join("\n");
 }
 
-function buildStickerDeletedText(stickerId) {
+function normalizeStickerSaveItems(items, config = {}) {
+  if (!Array.isArray(items)) {
+    throw new Error("Sticker save items must be an array.");
+  }
+  if (!items.length) {
+    throw new Error("Sticker save items cannot be empty.");
+  }
+  if (items.length > MAX_STICKER_SAVE_BATCH_SIZE) {
+    throw new Error(`Sticker save batch size must be ${MAX_STICKER_SAVE_BATCH_SIZE} or less.`);
+  }
+  return items.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Sticker save item must be an object: ${index}`);
+    }
+    return {
+      filePath: resolveStickerInboxFilePath(config, item.filePath),
+      tags: normalizeStickerTags(item.tags),
+      desc: normalizeStickerDesc(item.desc),
+    };
+  });
+}
+
+function normalizeStickerUpdateItems(items) {
+  if (!Array.isArray(items)) {
+    throw new Error("Sticker update items must be an array.");
+  }
+  if (!items.length) {
+    throw new Error("Sticker update items cannot be empty.");
+  }
+  if (items.length > MAX_STICKER_MUTATION_BATCH_SIZE) {
+    throw new Error(`Sticker update batch size must be ${MAX_STICKER_MUTATION_BATCH_SIZE} or less.`);
+  }
+  const seen = new Set();
+  return items.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Sticker update item must be an object: ${index}`);
+    }
+    const stickerId = normalizeStickerId(item.stickerId);
+    if (!stickerId) {
+      throw new Error("Sticker id is required.");
+    }
+    if (seen.has(stickerId)) {
+      throw new Error(`Duplicate sticker id in update batch: ${stickerId}`);
+    }
+    seen.add(stickerId);
+    return {
+      stickerId,
+      tags: normalizeStickerTags(item.tags),
+      desc: normalizeStickerDesc(item.desc),
+    };
+  });
+}
+
+function normalizeStickerDeleteItems(items) {
+  if (!Array.isArray(items)) {
+    throw new Error("Sticker delete items must be an array.");
+  }
+  if (!items.length) {
+    throw new Error("Sticker delete items cannot be empty.");
+  }
+  if (items.length > MAX_STICKER_MUTATION_BATCH_SIZE) {
+    throw new Error(`Sticker delete batch size must be ${MAX_STICKER_MUTATION_BATCH_SIZE} or less.`);
+  }
+  const seen = new Set();
+  const normalized = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Sticker delete item must be an object: ${index}`);
+    }
+    const stickerId = normalizeStickerId(item.stickerId);
+    if (!stickerId) {
+      throw new Error("Sticker id is required.");
+    }
+    if (seen.has(stickerId)) {
+      continue;
+    }
+    seen.add(stickerId);
+    normalized.push({ stickerId });
+  }
+  return normalized;
+}
+
+function resolveStickerInboxFilePath(config = {}, filePath = "") {
+  const resolvedInputPath = path.resolve(normalizeText(filePath));
+  if (!resolvedInputPath) {
+    throw new Error("Missing sticker inbox file path.");
+  }
+  if (!fs.existsSync(resolvedInputPath)) {
+    throw new Error(`Sticker inbox file does not exist: ${resolvedInputPath}`);
+  }
+  if (!isUnderDirectory(resolvedInputPath, buildStickerPaths(config).inboxDir)) {
+    throw new Error(`Sticker inbox file must be under ${buildStickerPaths(config).inboxDir}`);
+  }
+  const stat = fs.statSync(resolvedInputPath);
+  if (!stat.isFile()) {
+    throw new Error(`Sticker inbox file must be a file: ${resolvedInputPath}`);
+  }
+  return resolvedInputPath;
+}
+
+function mergeStickerTagCatalog(currentTags = [], incomingTags = []) {
+  const base = Array.isArray(currentTags)
+    ? currentTags.map((value) => normalizeText(value)).filter(Boolean)
+    : [];
+  const extra = Array.isArray(incomingTags)
+    ? incomingTags.map((value) => normalizeText(value)).filter(Boolean)
+    : [];
+  return Array.from(new Set([...base, ...extra]));
+}
+
+async function saveStickerEntry({
+  config = {},
+  index = {},
+  tagCatalog = [],
+  hashByStickerId = new Map(),
+  item = {},
+} = {}) {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cyberboss-sticker-save-"));
+  const normalizedGifPath = path.join(tempDir, "normalized.gif");
+  try {
+    await normalizeStickerGif({
+      inputPath: item.filePath,
+      outputPath: normalizedGifPath,
+      scriptPath: config.stickerNormalizeGifScript,
+    });
+    const normalizedBuffer = await fsp.readFile(normalizedGifPath);
+    const normalizedHash = computeBufferHash(normalizedBuffer);
+    const duplicate = findDuplicateStickerByHash(config, index, hashByStickerId, normalizedHash);
+    if (duplicate) {
+      return {
+        result: {
+          stickerId: duplicate.stickerId,
+          filePath: duplicate.filePath,
+          created: false,
+          deduped: true,
+          tags: index[duplicate.stickerId]?.tags || [],
+          desc: index[duplicate.stickerId]?.desc || "",
+        },
+        createdPath: "",
+      };
+    }
+
+    const stickerId = allocateNextStickerId(index);
+    const stickerPath = resolveStickerFilePath(config, stickerId);
+    await fsp.mkdir(path.dirname(stickerPath), { recursive: true });
+    await fsp.copyFile(normalizedGifPath, stickerPath);
+    index[stickerId] = {
+      tags: item.tags,
+      desc: item.desc,
+    };
+    hashByStickerId.set(stickerId, normalizedHash);
+    tagCatalog.splice(0, tagCatalog.length, ...mergeStickerTagCatalog(tagCatalog, item.tags));
+    return {
+      result: {
+        stickerId,
+        filePath: stickerPath,
+        created: true,
+        deduped: false,
+        tags: item.tags,
+        desc: item.desc,
+      },
+      createdPath: stickerPath,
+    };
+  } finally {
+    await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function buildStickerDeletedText(stickerIds) {
+  const normalizedIds = Array.isArray(stickerIds)
+    ? stickerIds.map((value) => normalizeStickerId(value)).filter(Boolean)
+    : [normalizeStickerId(stickerIds)].filter(Boolean);
   return [
+    "❌ 系统提示:",
     "表情包已删除",
-    `ID: ${stickerId}`,
+    `ID: ${normalizedIds.join("、")}`,
   ].join("\n");
 }
 
@@ -442,6 +634,10 @@ async function writeJsonFile(filePath, value) {
 
 module.exports = {
   DEFAULT_PICK_LIMIT,
+  MIN_STICKER_DESC_CHARS,
+  STICKER_TAG_GUIDANCE,
+  STICKER_DESC_GUIDANCE,
+  STICKER_DESC_FIELD_DESCRIPTION,
   StickerService,
   allocateNextStickerId,
   buildStickerPaths,

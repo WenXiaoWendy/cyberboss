@@ -48,21 +48,54 @@ function createHost() {
             delivery: { userId: args.userId || "user-1" },
           };
         },
-        async deleteById(args) {
+        async delete(args) {
           return {
-            stickerId: args.stickerId,
-            filePath: "/tmp/stk_001.gif",
-            deleted: true,
+            results: args.items.map((item) => ({
+              stickerId: item.stickerId,
+              filePath: `/tmp/${item.stickerId}.gif`,
+              deleted: true,
+            })),
+            deletedCount: args.items.length,
           };
         },
         async saveFromInbox(args) {
+          const hasDuplicate = args.items.some((item) => item.desc === "重复");
+          if (hasDuplicate) {
+            return {
+              createdCount: 0,
+              dedupedCount: 1,
+              results: [{
+                stickerId: "stk_001",
+                filePath: "/tmp/stk_001.gif",
+                created: false,
+                deduped: true,
+                tags: ["可爱"],
+                desc: "已存在",
+              }],
+            };
+          }
           return {
-            stickerId: "stk_001",
-            filePath: "/tmp/stk_001.gif",
-            created: true,
-            deduped: false,
-            tags: args.tags,
-            desc: args.desc,
+            createdCount: args.items.length,
+            dedupedCount: 0,
+            results: args.items.map((item, index) => ({
+              stickerId: "stk_001",
+              created: true,
+              deduped: false,
+              tags: item.tags,
+              desc: item.desc,
+              filePath: `/tmp/stk_00${index + 1}.gif`,
+            })),
+          };
+        },
+        async update(args) {
+          return {
+            results: args.items.map((item) => ({
+              stickerId: item.stickerId,
+              tags: item.tags,
+              desc: item.desc,
+              updated: true,
+            })),
+            updatedCount: args.items.length,
           };
         },
       },
@@ -210,12 +243,28 @@ test("tool host exposes sticker tools with compact structured outputs", async ()
     stickerId: "stk_001",
   }, {});
   const deleteResult = await host.invokeTool("cyberboss_sticker_delete", {
-    stickerId: "stk_001",
+    items: [{ stickerId: "stk_001" }],
   }, {});
   const saveResult = await host.invokeTool("cyberboss_sticker_save_from_inbox", {
-    filePath: "/tmp/inbox/cat.png",
-    tags: ["可爱"],
-    desc: "小猫歪头卖萌",
+    items: [{
+      filePath: "/tmp/inbox/cat.png",
+      tags: ["可爱"],
+      desc: "小猫歪头卖萌",
+    }],
+  }, {});
+  const duplicateSaveResult = await host.invokeTool("cyberboss_sticker_save_from_inbox", {
+    items: [{
+      filePath: "/tmp/inbox/cat.png",
+      tags: ["可爱"],
+      desc: "重复",
+    }],
+  }, {});
+  const updateResult = await host.invokeTool("cyberboss_sticker_update", {
+    items: [{
+      stickerId: "stk_001",
+      tags: ["可爱", "新标签"],
+      desc: "改好的描述",
+    }],
   }, {});
 
   assert.equal(tagsResult.text, "Sticker tags loaded: 3.");
@@ -223,8 +272,10 @@ test("tool host exposes sticker tools with compact structured outputs", async ()
   assert.equal(pickResult.text, "Sticker candidates loaded: 1.");
   assert.equal(pickResult.data.candidates[0].stickerId, "stk_001");
   assert.equal(sendResult.text, "Sticker sent: stk_001");
-  assert.equal(deleteResult.text, "Sticker deleted: stk_001");
-  assert.equal(saveResult.text, "Sticker saved: stk_001");
+  assert.equal(deleteResult.text, "Sticker batch deleted: 1.");
+  assert.equal(saveResult.text, "Sticker batch processed: 1 saved, 0 already existed.");
+  assert.match(duplicateSaveResult.text, /Do not mention duplicates; just reply normally\./);
+  assert.equal(updateResult.text, "Sticker batch updated: 1.");
 });
 
 test("tool host accepts structured timeline screenshot input", async () => {

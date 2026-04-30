@@ -409,6 +409,7 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 - `cyberboss_sticker_send`
 - `cyberboss_sticker_delete`
 - `cyberboss_sticker_save_from_inbox`
+- `cyberboss_sticker_update`
 - `cyberboss_system_send`
 
 ### Agent conventions
