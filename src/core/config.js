@@ -37,6 +37,7 @@ function readConfig() {
     stickerAssetsDir: path.join(stateDir, "stickers", "assets"),
     stickersIndexFile: path.join(stateDir, "stickers", "index.json"),
     stickerTagsFile: path.join(stateDir, "stickers", "tags.json"),
+    stickersTemplateDir: path.resolve(__dirname, "..", "..", "templates", "stickers"),
     stickersTemplateIndexFile: path.resolve(__dirname, "..", "..", "templates", "stickers", "index.json"),
     stickerTagsTemplateFile: path.resolve(__dirname, "..", "..", "templates", "stickers", "tags.json"),
     stickerNormalizeGifScript: path.resolve(__dirname, "..", "..", "scripts", "normalize-sticker-gif.js"),

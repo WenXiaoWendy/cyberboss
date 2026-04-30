@@ -250,6 +250,7 @@ function buildStickerPaths(config = {}) {
     stickerAssetsDir: normalizeText(config.stickerAssetsDir) || path.join(stateDir, "stickers", "assets"),
     stickersIndexFile: normalizeText(config.stickersIndexFile) || path.join(stateDir, "stickers", "index.json"),
     stickerTagsFile: normalizeText(config.stickerTagsFile) || path.join(stateDir, "stickers", "tags.json"),
+    stickersTemplateDir: normalizeText(config.stickersTemplateDir) || path.resolve(__dirname, "..", "..", "templates", "stickers"),
     stickersTemplateIndexFile: normalizeText(config.stickersTemplateIndexFile) || path.resolve(__dirname, "..", "..", "templates", "stickers", "index.json"),
     stickerTagsTemplateFile: normalizeText(config.stickerTagsTemplateFile) || path.resolve(__dirname, "..", "..", "templates", "stickers", "tags.json"),
   };
@@ -257,15 +258,16 @@ function buildStickerPaths(config = {}) {
 
 function ensureStickerCatalogFilesSync(config = {}) {
   const paths = buildStickerPaths(config);
-  fs.mkdirSync(paths.stickersDir, { recursive: true });
+  if (fs.existsSync(paths.stickersDir)) {
+    return;
+  }
+  if (paths.stickersTemplateDir && fs.existsSync(paths.stickersTemplateDir)) {
+    fs.cpSync(paths.stickersTemplateDir, paths.stickersDir, { recursive: true });
+    return;
+  }
   fs.mkdirSync(paths.stickerAssetsDir, { recursive: true });
-  fs.mkdirSync(path.dirname(paths.stickersIndexFile), { recursive: true });
-  ensureFileFromTemplateSync(paths.stickersIndexFile, paths.stickersTemplateIndexFile, "{}\n");
-  ensureFileFromTemplateSync(
-    paths.stickerTagsFile,
-    paths.stickerTagsTemplateFile,
-    "[]\n",
-  );
+  writeJsonFileSync(paths.stickersIndexFile, {});
+  writeJsonFileSync(paths.stickerTagsFile, []);
 }
 
 function loadStickerIndexSync(config = {}) {
@@ -307,8 +309,15 @@ function loadStickerTagsSync(config = {}) {
 
 function loadStickerTagsTemplateSync(config = {}) {
   const templatePath = buildStickerPaths(config).stickerTagsTemplateFile;
+  return loadStickerTagsFileSync(templatePath);
+}
+
+function loadStickerTagsFileSync(filePath = "") {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return [];
+  }
   try {
-    const raw = fs.readFileSync(templatePath, "utf8");
+    const raw = fs.readFileSync(filePath, "utf8");
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
       ? Array.from(new Set(parsed.map((value) => normalizeText(value)).filter(Boolean)))
@@ -320,18 +329,6 @@ function loadStickerTagsTemplateSync(config = {}) {
 
 function resolveStickerFilePath(config = {}, stickerId = "") {
   return path.join(buildStickerPaths(config).stickerAssetsDir, `${normalizeStickerId(stickerId)}.gif`);
-}
-
-function ensureFileFromTemplateSync(targetPath, templatePath, fallbackContent) {
-  if (!targetPath || fs.existsSync(targetPath)) {
-    return;
-  }
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  if (templatePath && fs.existsSync(templatePath)) {
-    fs.copyFileSync(templatePath, targetPath);
-    return;
-  }
-  fs.writeFileSync(targetPath, fallbackContent, "utf8");
 }
 
 function normalizeStickerTags(tags) {
@@ -630,6 +627,11 @@ function isUnderDirectory(filePath, parentDir) {
 async function writeJsonFile(filePath, value) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   await fsp.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function writeJsonFileSync(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 module.exports = {

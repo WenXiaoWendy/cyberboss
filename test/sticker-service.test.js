@@ -8,12 +8,13 @@ const { saveWeixinAccount } = require("../src/adapters/channel/weixin/account-st
 const { persistContextToken } = require("../src/adapters/channel/weixin/context-token-store");
 const {
   StickerService,
+  ensureStickerCatalogFilesSync,
   loadStickerTagsTemplateSync,
   loadStickerTagsSync,
   loadStickerIndexSync,
 } = require("../src/services/sticker-service");
 
-function createConfig() {
+function createConfig(overrides = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-test-"));
   const stickersDir = path.join(stateDir, "stickers");
   return {
@@ -22,6 +23,7 @@ function createConfig() {
     stickerAssetsDir: path.join(stickersDir, "assets"),
     stickersIndexFile: path.join(stickersDir, "index.json"),
     stickerTagsFile: path.join(stickersDir, "tags.json"),
+    stickersTemplateDir: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers"),
     stickersTemplateIndexFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "index.json"),
     stickerTagsTemplateFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "tags.json"),
     stickerNormalizeGifScript: path.join("/Users/tingyiwen/Dev/cyberboss", "scripts", "normalize-sticker-gif.js"),
@@ -29,6 +31,7 @@ function createConfig() {
     weixinBaseUrl: "https://ilinkai.weixin.qq.com",
     workspaceId: "default",
     allowedUserIds: [],
+    ...overrides,
   };
 }
 
@@ -73,11 +76,45 @@ function createService(config) {
   return { service, sentTexts, sentFiles };
 }
 
+function writeTinyGif(filePath) {
+  const gifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, Buffer.from(gifBase64, "base64"));
+}
+
 test("sticker service initializes the default tag catalog", () => {
   const config = createConfig();
   const tags = loadStickerTagsSync(config);
   assert.deepEqual(tags, loadStickerTagsTemplateSync(config));
   assert.ok(fs.existsSync(config.stickerTagsFile));
+});
+
+test("sticker service copies the whole template sticker directory when local stickers do not exist", () => {
+  const templateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-template-"));
+  const config = createConfig({
+    stickersTemplateDir: templateDir,
+    stickersTemplateIndexFile: path.join(templateDir, "index.json"),
+    stickerTagsTemplateFile: path.join(templateDir, "tags.json"),
+  });
+  writeJson(config.stickersTemplateIndexFile, {
+    stk_900: {
+      tags: ["预设", "开心"],
+      desc: "模板预设表情包",
+    },
+  });
+  writeJson(config.stickerTagsTemplateFile, ["预设", "开心"]);
+  writeTinyGif(path.join(templateDir, "assets", "stk_900.gif"));
+
+  ensureStickerCatalogFilesSync(config);
+
+  assert.deepEqual(loadStickerIndexSync(config), {
+    stk_900: {
+      tags: ["预设", "开心"],
+      desc: "模板预设表情包",
+    },
+  });
+  assert.deepEqual(loadStickerTagsSync(config), ["预设", "开心"]);
+  assert.equal(fs.existsSync(path.join(config.stickerAssetsDir, "stk_900.gif")), true);
 });
 
 test("sticker service keeps a local tags file unchanged when a template exists", () => {
@@ -219,8 +256,7 @@ test("sticker service updates, picks, sends, and deletes saved stickers", async 
   assert.equal(loadStickerTagsSync(config).includes("新标签"), true);
 
   const picked = await service.pick({ tag: "开心", limit: 3 });
-  assert.equal(picked.candidates.length, 1);
-  assert.equal(picked.candidates[0].stickerId, savedItem.stickerId);
+  assert.equal(picked.candidates.some((item) => item.stickerId === savedItem.stickerId), true);
 
   const delivery = await service.sendToCurrentChat({
     stickerId: savedItem.stickerId,
@@ -244,3 +280,8 @@ test("sticker service updates, picks, sends, and deletes saved stickers", async 
   assert.match(sentTexts[sentTexts.length - 1].text, /^❌ 系统提示:/);
   assert.match(sentTexts[sentTexts.length - 1].text, /表情包已删除/);
 });
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
