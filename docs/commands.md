@@ -67,6 +67,17 @@ The intentionally small public set is:
 - `npm run doctor`
 - `npm run help`
 
+## Doctor Diagnostics
+
+- `npm run doctor`
+  Prints a read-only maintainer-oriented diagnostics report.
+- `npm run --silent doctor -- --json`
+  Prints stable redacted JSON for issue triage.
+- `npm run --silent doctor -- --json --network`
+  Adds non-mutating network reachability probes.
+- `npm run doctor -- --unsafe-verbose`
+  Shows fuller local paths and ids while still redacting tokens, cookies, private keys, and API secrets.
+
 ## Project Tools
 
 Models no longer use local capability CLI commands for diary, reminders, timeline, screenshots, or file sending.

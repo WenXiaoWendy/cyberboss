@@ -11,6 +11,10 @@ const { buildTerminalHelpText } = require("./core/command-registry");
 const { ensureStickerCatalogFilesSync } = require("./services/sticker-service");
 const { createProjectTooling } = require("./tools/create-project-tooling");
 const { runToolMcpServer } = require("./tools/mcp-stdio-server");
+const { runDoctor } = require("./diagnostics");
+const { parseDoctorOptions } = require("./diagnostics/options");
+const { formatJsonReport } = require("./diagnostics/format-json");
+const { formatTextReport } = require("./diagnostics/format-text");
 
 function ensureDefaultStateDirectory() {
   fs.mkdirSync(path.join(os.homedir(), ".cyberboss"), { recursive: true });
@@ -98,7 +102,6 @@ async function main() {
   installRuntimeErrorHooks();
   const argv = process.argv.slice(2);
   const config = readConfig();
-  ensureBootstrapFiles(config);
   const command = config.mode || "help";
   let app = null;
   const getApp = () => {
@@ -114,9 +117,13 @@ async function main() {
   }
 
   if (command === "doctor") {
-    getApp().printDoctor();
+    const options = parseDoctorOptions(config.argv);
+    const report = await runDoctor(config, options);
+    console.log(options.json ? formatJsonReport(report) : formatTextReport(report));
     return;
   }
+
+  ensureBootstrapFiles(config);
 
   if (command === "login") {
     await getApp().login();

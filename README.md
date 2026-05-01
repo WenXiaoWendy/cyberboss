@@ -229,9 +229,18 @@ When `CYBERBOSS_RUNTIME=claudecode`, Cyberboss also upserts a workspace-local `.
 - `npm run shared:status`
   Check the shared runtime process, shared bridge, and `readyz`
 - `npm run doctor`
-  Inspect current config, channel/runtime boundaries, and thread status
+  Run read-only diagnostics. Default output is maintainer-readable text.
 - `npm run help`
   Show stable command entrypoints
+
+Doctor flags:
+
+- `npm run --silent doctor -- --json`
+  Print a stable redacted JSON report that is intended to be safe for public issue triage.
+- `npm run --silent doctor -- --json --network`
+  Add non-mutating network reachability probes.
+- `npm run doctor -- --unsafe-verbose`
+  Include fuller local paths and ids. Tokens, cookies, private keys, and API secrets remain redacted.
 
 Here, `checkin` means the random wake-up mechanism, not a fixed periodic reminder.
 

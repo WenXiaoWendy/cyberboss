@@ -97,14 +97,14 @@ class CyberbossApp {
     });
   }
 
-  printDoctor() {
-    console.log(JSON.stringify({
-      stateDir: this.config.stateDir,
-      channel: this.channelAdapter.describe(),
-      runtime: this.runtimeAdapter.describe(),
-      timeline: this.timelineIntegration.describe(),
-      threads: this.threadStateStore.snapshot(),
-    }, null, 2));
+  async printDoctor() {
+    const { runDoctor } = require("../diagnostics");
+    const { parseDoctorOptions } = require("../diagnostics/options");
+    const { formatJsonReport } = require("../diagnostics/format-json");
+    const { formatTextReport } = require("../diagnostics/format-text");
+    const options = parseDoctorOptions(this.config.argv);
+    const report = await runDoctor(this.config, options);
+    console.log(options.json ? formatJsonReport(report) : formatTextReport(report));
   }
 
   async login() {
