@@ -29,19 +29,32 @@ function main() {
     return;
   }
 
-  if (process.platform !== "darwin") {
-    throw new Error("Sticker GIF normalization for non-GIF inputs currently requires macOS `sips`.");
-  }
-  if (!fs.existsSync(SIPS_PATH)) {
-    throw new Error(`Required tool missing: ${SIPS_PATH}`);
+  const normalizedSize = Number.isInteger(size) && size > 0 ? size : DEFAULT_SIZE;
+  if (process.platform === "darwin" && fs.existsSync(SIPS_PATH)) {
+    normalizeWithSips({ inputPath: resolvedInputPath, outputPath: resolvedOutputPath, size: normalizedSize });
+    return;
   }
 
-  const normalizedSize = Number.isInteger(size) && size > 0 ? size : DEFAULT_SIZE;
+  const imageMagick = findCommand(["magick", "convert"]);
+  if (imageMagick) {
+    normalizeWithImageMagick({
+      command: imageMagick,
+      inputPath: resolvedInputPath,
+      outputPath: resolvedOutputPath,
+      size: normalizedSize,
+    });
+    return;
+  }
+
+  throw new Error("Sticker GIF normalization for non-GIF inputs requires macOS `sips` or ImageMagick (`magick`/`convert`).");
+}
+
+function normalizeWithSips({ inputPath, outputPath, size }) {
   const result = spawnSync(SIPS_PATH, [
     "-s", "format", "gif",
-    "-z", String(normalizedSize), String(normalizedSize),
-    resolvedInputPath,
-    "--out", resolvedOutputPath,
+    "-z", String(size), String(size),
+    inputPath,
+    "--out", outputPath,
   ], {
     encoding: "utf8",
   });
@@ -51,8 +64,27 @@ function main() {
     const stdout = String(result.stdout || "").trim();
     throw new Error(`sips gif normalization failed: ${stderr || stdout || `exit ${result.status}`}`);
   }
-  if (!fs.existsSync(resolvedOutputPath)) {
-    throw new Error(`GIF normalization produced no output: ${resolvedOutputPath}`);
+  ensureOutput(outputPath);
+}
+
+function normalizeWithImageMagick({ command, inputPath, outputPath, size }) {
+  const args = command === "magick"
+    ? [inputPath, "-resize", `${size}x${size}`, outputPath]
+    : [inputPath, "-resize", `${size}x${size}`, outputPath];
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "").trim();
+    const stdout = String(result.stdout || "").trim();
+    throw new Error(`ImageMagick gif normalization failed: ${stderr || stdout || `exit ${result.status}`}`);
+  }
+  ensureOutput(outputPath);
+}
+
+function ensureOutput(outputPath) {
+  if (!fs.existsSync(outputPath)) {
+    throw new Error(`GIF normalization produced no output: ${outputPath}`);
   }
 }
 
@@ -60,6 +92,19 @@ function readFlag(args, flag) {
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === flag) {
       return String(args[index + 1] || "").trim();
+    }
+  }
+  return "";
+}
+
+function findCommand(names) {
+  const pathEntries = String(process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const name of names) {
+    for (const entry of pathEntries) {
+      const candidate = path.join(entry, name);
+      if (fs.existsSync(candidate)) {
+        return name;
+      }
     }
   }
   return "";

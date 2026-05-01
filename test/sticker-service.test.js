@@ -14,6 +14,8 @@ const {
   loadStickerIndexSync,
 } = require("../src/services/sticker-service");
 
+const REPO_ROOT = path.resolve(__dirname, "..");
+
 function createConfig(overrides = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-test-"));
   const stickersDir = path.join(stateDir, "stickers");
@@ -23,10 +25,10 @@ function createConfig(overrides = {}) {
     stickerAssetsDir: path.join(stickersDir, "assets"),
     stickersIndexFile: path.join(stickersDir, "index.json"),
     stickerTagsFile: path.join(stickersDir, "tags.json"),
-    stickersTemplateDir: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers"),
-    stickersTemplateIndexFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "index.json"),
-    stickerTagsTemplateFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "tags.json"),
-    stickerNormalizeGifScript: path.join("/Users/tingyiwen/Dev/cyberboss", "scripts", "normalize-sticker-gif.js"),
+    stickersTemplateDir: path.join(REPO_ROOT, "templates", "stickers"),
+    stickersTemplateIndexFile: path.join(REPO_ROOT, "templates", "stickers", "index.json"),
+    stickerTagsTemplateFile: path.join(REPO_ROOT, "templates", "stickers", "tags.json"),
+    stickerNormalizeGifScript: path.join(REPO_ROOT, "scripts", "normalize-sticker-gif.js"),
     accountsDir: path.join(stateDir, "accounts"),
     weixinBaseUrl: "https://ilinkai.weixin.qq.com",
     workspaceId: "default",
@@ -39,7 +41,7 @@ function writeInboxPng(config, fileName = "cat.png") {
   const inboxDir = path.join(config.stateDir, "inbox", "2026-04-29");
   fs.mkdirSync(inboxDir, { recursive: true });
   const filePath = path.join(inboxDir, fileName);
-  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAABlBMVEX/AAD///9BHTQRAAAAAWJLR0QB/wIt3gAAAAd0SU1FB+oFAQwFNrCA4ukAAAAKSURBVAjXY2AAAAACAAHiIbwzAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDI2LTA1LTAxVDEyOjA1OjU0KzAwOjAwSVqVVwAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyNi0wNS0wMVQxMjowNTo1NCswMDowMDgHLesAAAAASUVORK5CYII=";
   fs.writeFileSync(filePath, Buffer.from(pngBase64, "base64"));
   return filePath;
 }

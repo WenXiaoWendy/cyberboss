@@ -48,6 +48,7 @@ test("handlePreparedMessage queues a normal inbound message while the scope is b
       setReplyTarget() {},
     },
     pendingInboundByScope: new Map(),
+    pendingImageInboundByScope: new Map(),
     resolveWorkspaceRoot() {
       return "/workspace";
     },
@@ -64,6 +65,8 @@ test("handlePreparedMessage queues a normal inbound message while the scope is b
     bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared }) {
       queued.push({ bindingKey, workspaceRoot, ...prepared });
     },
+    hasPendingImageInbound: CyberbossApp.prototype.hasPendingImageInbound,
+    routePreparedInbound: CyberbossApp.prototype.routePreparedInbound,
     isTurnDispatchBlocked: CyberbossApp.prototype.isTurnDispatchBlocked,
   };
 
@@ -175,6 +178,7 @@ test("handlePreparedMessage queues while the scope is in a turn-boundary handoff
       setReplyTarget() {},
     },
     pendingInboundByScope: new Map(),
+    pendingImageInboundByScope: new Map(),
     resolveWorkspaceRoot() {
       return "/workspace";
     },
@@ -191,6 +195,8 @@ test("handlePreparedMessage queues while the scope is in a turn-boundary handoff
     bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared }) {
       queued.push({ bindingKey, workspaceRoot, ...prepared });
     },
+    hasPendingImageInbound: CyberbossApp.prototype.hasPendingImageInbound,
+    routePreparedInbound: CyberbossApp.prototype.routePreparedInbound,
     isTurnDispatchBlocked: CyberbossApp.prototype.isTurnDispatchBlocked,
   };
 
@@ -541,6 +547,7 @@ test("flushPendingInboundMessages batches queued messages from the same scope in
       dispatched.push(payload);
       return true;
     },
+    mergePendingInboundDraft: CyberbossApp.prototype.mergePendingInboundDraft,
   };
 
   await CyberbossApp.prototype.flushPendingInboundMessages.call(appLike);
@@ -600,6 +607,7 @@ test("flushPendingInboundMessages falls back to messageId ordering when received
       dispatched.push(payload);
       return true;
     },
+    mergePendingInboundDraft: CyberbossApp.prototype.mergePendingInboundDraft,
   };
 
   await CyberbossApp.prototype.flushPendingInboundMessages.call(appLike);

@@ -237,9 +237,18 @@ CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
 - `npm run shared:status`
   跨平台查看共享 runtime 进程、共享桥接和 `readyz` 状态
 - `npm run doctor`
-  查看当前配置、channel/runtime 边界和线程状态
+  运行只读诊断。默认输出是维护者排障用的文本报告
 - `npm run help`
   查看可直接执行的命令入口
+
+Doctor 参数：
+
+- `npm run --silent doctor -- --json`
+  输出稳定且已脱敏的 JSON 报告，适合公开 issue 排障
+- `npm run --silent doctor -- --json --network`
+  额外执行不修改状态的网络可达性探测
+- `npm run doctor -- --unsafe-verbose`
+  展示更完整的本地路径和 id；token、cookie、私钥和 API secret 仍然会被脱敏
 
 这里的 `checkin` 指的就是“随机轮询唤醒”能力，不是固定整点提醒。
 
