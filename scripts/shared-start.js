@@ -9,6 +9,13 @@ const {
   ensureBridgeNotRunning,
 } = require("./shared-common");
 
+const MAX_BACKOFF_MS = 60_000;
+const STABLE_UPTIME_MS = 30_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main() {
   const runtime = process.env.CYBERBOSS_RUNTIME || "codex";
   console.log(`starting shared bridge runtime=${runtime}`);
@@ -32,30 +39,68 @@ async function main() {
     childEnv.CYBERBOSS_CODEX_ENDPOINT = listenUrl;
   }
 
-  const child = spawn(process.execPath, ["./bin/cyberboss.js", "start", "--checkin"], {
-    cwd: rootDir,
-    env: childEnv,
-    stdio: "inherit",
-  });
+  let restartCount = 0;
+  let stableSince = Date.now();
+  let shuttingDown = false;
+  let currentChild = null;
 
-  writePidFile(bridgePidFile, child.pid);
-  const cleanup = () => removePidFileIfMatches(bridgePidFile, child.pid);
-  process.on("exit", cleanup);
-  process.on("SIGINT", () => {
-    child.kill("SIGINT");
-  });
-  process.on("SIGTERM", () => {
-    child.kill("SIGTERM");
-  });
+  const shutdown = () => {
+    shuttingDown = true;
+    if (currentChild && !currentChild.killed) {
+      currentChild.kill("SIGTERM");
+    }
+  };
 
-  child.on("exit", (code, signal) => {
-    cleanup();
-    if (signal) {
-      process.kill(process.pid, signal);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  while (!shuttingDown) {
+    currentChild = spawn(process.execPath, ["./bin/cyberboss.js", "start", "--checkin"], {
+      cwd: rootDir,
+      env: childEnv,
+      stdio: "inherit",
+    });
+
+    writePidFile(bridgePidFile, currentChild.pid);
+
+    const exitResult = await new Promise((resolve) => {
+      currentChild.on("error", (err) => {
+        resolve({ code: 1, signal: null, error: err });
+      });
+      currentChild.on("exit", (code, signal) => {
+        resolve({ code, signal, error: null });
+      });
+    });
+
+    removePidFileIfMatches(bridgePidFile, currentChild.pid);
+
+    if (exitResult.error) {
+      console.error(`[shared] failed to spawn bridge: ${exitResult.error.message}`);
+    }
+
+    if (shuttingDown) {
+      process.exit(exitResult.signal ? 0 : (exitResult.code ?? 0));
       return;
     }
-    process.exit(code ?? 0);
-  });
+
+    if (exitResult.signal) {
+      console.error(`[shared] bridge killed by signal ${exitResult.signal}; shutting down`);
+      process.exit(1);
+      return;
+    }
+
+    const uptime = Date.now() - stableSince;
+    if (uptime >= STABLE_UPTIME_MS) {
+      restartCount = 0;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, restartCount), MAX_BACKOFF_MS);
+    restartCount += 1;
+    console.error(
+      `[shared] bridge exited code=${exitResult.code ?? "unknown"}; restarting in ${Math.round(delay / 1000)}s (attempt ${restartCount})`
+    );
+    await sleep(delay);
+  }
 }
 
 main().catch((error) => {

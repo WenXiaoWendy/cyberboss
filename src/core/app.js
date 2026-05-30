@@ -50,6 +50,7 @@ const BACKOFF_DELAY_MS = 30_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const MAX_INBOUND_STICKER_IMAGE_BATCH = 10;
 const INBOUND_IMAGE_BATCH_IDLE_MS = 1_500;
+const MAX_RETRY_COUNT = 3;
 
 function createRuntimeAdapter(config) {
   if (config.runtime === "claudecode") {
@@ -81,6 +82,7 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.turnTimeouts = new Map();
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -425,6 +427,38 @@ class CyberbossApp {
     return threadState?.status === "running" || hasRpcId(threadState?.pendingApproval?.requestId);
   }
 
+  scheduleTurnTimeout({ bindingKey, workspaceRoot, threadId, turnId }) {
+    this.clearTurnTimeout(threadId);
+    const timeout = setTimeout(async () => {
+      console.error(`[cyberboss] turn timeout thread=${threadId} turn=${turnId} — cancelling`);
+      try {
+        await this.runtimeAdapter.cancelTurn({ threadId, turnId, workspaceRoot });
+      } catch (err) {
+        console.error(`[cyberboss] turn timeout cancel failed: ${err.message}`);
+      }
+      this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
+      const scopeKey = buildScopeKey(bindingKey, workspaceRoot);
+      if (scopeKey) {
+        this.turnBoundaryScopeKeys.delete(scopeKey);
+      }
+      this.turnTimeouts.delete(threadId);
+      this.threadStateStore.applyRuntimeEvent({
+        type: "runtime.turn.failed",
+        payload: { threadId, turnId, text: "❌ Turn timed out (2 min)" },
+      });
+      await this.flushPendingInboundMessages({ bindingKey, workspaceRoot, ignoreBoundary: true }).catch(() => {});
+    }, 120_000);
+    this.turnTimeouts.set(threadId, timeout);
+  }
+
+  clearTurnTimeout(threadId) {
+    const timeout = this.turnTimeouts.get(threadId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.turnTimeouts.delete(threadId);
+    }
+  }
+
   async dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared }) {
     const pendingScopeKey = this.turnGateStore.begin(bindingKey, workspaceRoot);
     await this.channelAdapter.sendTyping({
@@ -474,6 +508,7 @@ class CyberbossApp {
       } else {
         this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
       }
+      this.scheduleTurnTimeout({ bindingKey, workspaceRoot, threadId: turn.threadId, turnId: turn.turnId });
       return true;
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
@@ -516,7 +551,11 @@ class CyberbossApp {
       this.bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared });
       return false;
     }
-    return this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+    const dispatched = await this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+    if (!dispatched) {
+      this.bufferPendingInboundMessage({ bindingKey, workspaceRoot, prepared });
+    }
+    return dispatched;
   }
 
   hasPendingImageInbound(bindingKey, workspaceRoot) {
@@ -659,6 +698,7 @@ class CyberbossApp {
       attachments: Array.isArray(prepared.attachments) ? prepared.attachments : [],
       attachmentFailures: Array.isArray(prepared.attachmentFailures) ? prepared.attachmentFailures : [],
       receivedAt: prepared.receivedAt,
+      retryCount: (Number(prepared.retryCount) || 0) + 1,
     });
     this.pendingInboundByScope.set(scopeKey, current);
     void this.channelAdapter.sendTyping({
@@ -692,6 +732,15 @@ class CyberbossApp {
         continue;
       }
       this.pendingInboundByScope.delete(scopeKey);
+      const retryCount = Number(pendingDispatch.prepared.retryCount) || 0;
+      if (retryCount > MAX_RETRY_COUNT) {
+        void this.channelAdapter.sendText({
+          userId: pendingDispatch.prepared.senderId,
+          text: `❌ Message dropped after ${MAX_RETRY_COUNT} failed delivery attempts`,
+          contextToken: pendingDispatch.prepared.contextToken,
+        }).catch(() => {});
+        continue;
+      }
       const dispatched = await this.dispatchPreparedTurn({
         bindingKey: pendingDispatch.prepared.bindingKey,
         workspaceRoot: pendingDispatch.prepared.workspaceRoot,
@@ -706,9 +755,15 @@ class CyberbossApp {
           attachments: pendingDispatch.prepared.attachments,
           attachmentFailures: pendingDispatch.prepared.attachmentFailures,
           receivedAt: pendingDispatch.prepared.receivedAt,
+          retryCount,
         },
       });
       if (!dispatched) {
+        for (const msg of draft.messages) {
+          if (msg) {
+            msg.retryCount = (Number(msg.retryCount) || 0) + 1;
+          }
+        }
         this.pendingInboundByScope.set(scopeKey, draft);
         continue;
       }
@@ -735,11 +790,14 @@ class CyberbossApp {
     if (queued.every((message) => shouldBatchImageOnlyInbound(message))) {
       const { batchMessages, remainingMessages } = takeImageOnlyBatchMessages(queued, MAX_INBOUND_STICKER_IMAGE_BATCH);
       return {
-        prepared: buildMergedInboundPrepared({
-          bindingKey: draft.bindingKey,
-          workspaceRoot: draft.workspaceRoot,
-          messages: batchMessages,
-        }),
+        prepared: {
+          ...buildMergedInboundPrepared({
+            bindingKey: draft.bindingKey,
+            workspaceRoot: draft.workspaceRoot,
+            messages: batchMessages,
+          }),
+          retryCount: maxRetryCount(batchMessages),
+        },
         remainingMessages,
       };
     }
@@ -765,6 +823,7 @@ class CyberbossApp {
         bindingKey: draft.bindingKey,
         workspaceRoot: draft.workspaceRoot,
         ...latest,
+        retryCount: maxRetryCount(queued),
         text: [
           "Multiple newer WeChat messages arrived while you were still handling the previous turn.",
           "Treat the following blocks as one ordered batch of fresh user input and respond once after considering all of them.",
@@ -1484,6 +1543,7 @@ class CyberbossApp {
       return;
     }
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
+      this.clearTurnTimeout(event.payload.threadId);
       const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
       const pendingOperations = this.pendingOperationByRunKey;
       const pendingOperation = pendingOperations?.get?.(completedRunKey) || null;
@@ -1539,11 +1599,18 @@ class CyberbossApp {
           this.turnBoundaryScopeKeys.delete(scopeKey);
         }
       }
+      if (linked?.bindingKey && linked?.workspaceRoot && this.hasPendingInboundMessage(linked.bindingKey, linked.workspaceRoot)) {
+        await this.flushPendingInboundMessages({
+          bindingKey: linked.bindingKey,
+          workspaceRoot: linked.workspaceRoot,
+        }).catch(() => {});
+      }
       return;
     }
     if (event.type !== "runtime.approval.requested") {
       return;
     }
+    this.clearTurnTimeout(event.payload.threadId);
     const sessionStore = this.runtimeAdapter.getSessionStore();
     const linked = sessionStore.findBindingForThreadId(event.payload.threadId);
     if (!linked?.workspaceRoot) {
@@ -2232,6 +2299,17 @@ function comparePendingInboundMessages(left, right) {
   }
 
   return String(left?.text || "").localeCompare(String(right?.text || ""));
+}
+
+function maxRetryCount(messages) {
+  let max = 0;
+  for (const msg of messages) {
+    const count = Number(msg?.retryCount) || 0;
+    if (count > max) {
+      max = count;
+    }
+  }
+  return max;
 }
 
 function parseMessageIdForOrdering(value) {

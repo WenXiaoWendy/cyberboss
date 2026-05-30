@@ -83,12 +83,15 @@ function installRuntimeErrorHooks() {
   process.on("unhandledRejection", (reason) => {
     const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
     console.error(`[cyberboss] unhandled rejection ${message}`);
+    try { fs.appendFileSync(path.join(os.homedir(), ".cyberboss", "crash.log"), `[${new Date().toISOString()}] unhandledRejection ${message}\n`); } catch {}
+    process.exit(1);
   });
 
   process.on("uncaughtException", (error) => {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     console.error(`[cyberboss] uncaught exception ${message}`);
-    process.exitCode = 1;
+    try { fs.appendFileSync(path.join(os.homedir(), ".cyberboss", "crash.log"), `[${new Date().toISOString()}] uncaughtException ${message}\n`); } catch {}
+    process.exit(1);
   });
 }
 

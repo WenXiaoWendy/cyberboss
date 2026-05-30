@@ -1,14 +1,20 @@
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
 
+const IS_WINDOWS = os.platform() === "win32";
+
 class ClaudeCodeIpcServer extends EventEmitter {
-  constructor({ socketPath }) {
+  constructor({ socketPath, stateDir }) {
     super();
     this.socketPath = socketPath;
-    this.tokenFile = `${socketPath}.token`;
+    this.stateDir = stateDir || path.join(os.homedir(), ".cyberboss");
+    this.tokenFile = IS_WINDOWS
+      ? path.join(this.stateDir, "claudecode-ipc.token")
+      : `${socketPath}.token`;
     this.authToken = "";
     this.server = null;
     this.clients = new Set();
@@ -61,8 +67,23 @@ class ClaudeCodeIpcServer extends EventEmitter {
     });
 
     this.server.listen(this.socketPath, () => {
-      fs.chmodSync(this.socketPath, 0o600);
+      if (!IS_WINDOWS) {
+        try {
+          fs.chmodSync(this.socketPath, 0o600);
+        } catch {
+          // ignore
+        }
+      }
     });
+
+    if (IS_WINDOWS) {
+      this.server.on("error", (err) => {
+        if (err.code === "EACCES") {
+          // Windows named pipe permission error - log but don't crash
+          console.error("[cyberboss] IPC server: named pipe permission error:", err.message);
+        }
+      });
+    }
   }
 
   broadcast(event) {
@@ -82,6 +103,7 @@ class ClaudeCodeIpcServer extends EventEmitter {
   }
 
   removeStaleSocket() {
+    if (IS_WINDOWS) return;
     try {
       const stat = fs.lstatSync(this.socketPath);
       if (!stat.isSocket()) {

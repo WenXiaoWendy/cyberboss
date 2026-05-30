@@ -29,6 +29,7 @@ function createTimelineIntegration(config) {
         ...prepared.extraEnv,
       }, {
         subcommand: normalizedSubcommand,
+        stdinContent: prepared.stdinContent,
       });
     },
   };
@@ -42,14 +43,21 @@ function resolveTimelineBinPath() {
 function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const spawnSpec = buildTimelineSpawnSpec(binPath, args);
+    const stdinContent = options.stdinContent || "";
     const child = spawn(spawnSpec.command, spawnSpec.args, {
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: [stdinContent ? "pipe" : "inherit", "pipe", "pipe"],
       env: {
         ...process.env,
         ...extraEnv,
       },
       shell: false,
     });
+
+    if (stdinContent) {
+      child.stdin.setEncoding("utf8");
+      child.stdin.write(stdinContent);
+      child.stdin.end();
+    }
 
     let stdout = "";
     let stderr = "";
@@ -127,34 +135,10 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
 }
 
 function buildTimelineSpawnSpec(binPath, args = []) {
-  if (IS_WINDOWS) {
-    return {
-      command: "cmd.exe",
-      args: ["/d", "/s", "/c", buildWindowsNodeCommand(process.execPath, binPath, args)],
-    };
-  }
-
   return {
     command: process.execPath,
     args: [binPath, ...args],
   };
-}
-
-function buildWindowsNodeCommand(nodePath, binPath, args = []) {
-  const commandParts = [nodePath, binPath, ...args].map(quoteWindowsCmdArg);
-  return commandParts.join(" ");
-}
-
-function quoteWindowsCmdArg(value) {
-  const text = String(value ?? "");
-  if (!text.length) {
-    return "\"\"";
-  }
-  if (!/[\s"]/u.test(text)) {
-    return text;
-  }
-  const escaped = text.replace(/(\\*)"/g, "$1$1\\\"");
-  return `"${escaped.replace(/(\\+)$/g, "$1$1")}"`;
 }
 
 function normalizeArgs(args) {
@@ -172,6 +156,7 @@ function prepareTimelineInvocation(subcommand, args = []) {
   const extraEnv = {};
   let sawJsonArgument = false;
   let sawEventsSource = false;
+  let stdinContent = "";
 
   for (let index = 0; index < normalizedArgs.length; index += 1) {
     const token = normalizedArgs[index];
@@ -193,7 +178,12 @@ function prepareTimelineInvocation(subcommand, args = []) {
       if (sawJsonArgument || sawEventsSource) {
         throw new Error("Use only one of --json, --events-json, or --events-file");
       }
-      preparedArgs.push("--json", next);
+      if (IS_WINDOWS) {
+        preparedArgs.push("--stdin");
+        stdinContent = next;
+      } else {
+        preparedArgs.push("--json", next);
+      }
       sawEventsSource = true;
       index += 1;
       continue;
@@ -206,7 +196,13 @@ function prepareTimelineInvocation(subcommand, args = []) {
       if (sawJsonArgument || sawEventsSource) {
         throw new Error("Use only one of --json, --events-json, or --events-file");
       }
-      preparedArgs.push("--json", fs.readFileSync(path.resolve(next), "utf8"));
+      const fileContent = fs.readFileSync(path.resolve(next), "utf8");
+      if (IS_WINDOWS) {
+        preparedArgs.push("--stdin");
+        stdinContent = fileContent;
+      } else {
+        preparedArgs.push("--json", fileContent);
+      }
       sawEventsSource = true;
       index += 1;
       continue;
@@ -222,7 +218,7 @@ function prepareTimelineInvocation(subcommand, args = []) {
     preparedArgs.push(token);
   }
 
-  return { args: preparedArgs, extraEnv };
+  return { args: preparedArgs, extraEnv, stdinContent };
 }
 
 function normalizeText(value) {

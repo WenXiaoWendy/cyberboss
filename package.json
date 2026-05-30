@@ -17,6 +17,7 @@
     "start:checkin": "node ./bin/cyberboss.js start --checkin",
     "login": "node ./bin/cyberboss.js login",
     "accounts": "node ./bin/cyberboss.js accounts",
+    "timeline": "node -e \"process.env.TIMELINE_FOR_AGENT_STATE_DIR=require('os').homedir()+'/.cyberboss';require('timeline-for-agent/bin/timeline-for-agent.js')\" -- dev --locale zh-CN",
     "doctor": "node ./bin/cyberboss.js doctor",
     "help": "node ./bin/cyberboss.js help",
     "shared:start": "node ./scripts/shared-start.js",

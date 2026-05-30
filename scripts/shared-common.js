@@ -40,6 +40,17 @@ function isPidAlive(pid) {
   if (!Number.isInteger(numeric) || numeric <= 0) {
     return false;
   }
+  if (process.platform === "win32") {
+    try {
+      const result = require("child_process").execSync(
+        `tasklist /FI "PID eq ${numeric}" /NH`,
+        { encoding: "utf8", timeout: 3000, windowsHide: true }
+      );
+      return result.includes(String(numeric));
+    } catch {
+      return false;
+    }
+  }
   try {
     process.kill(numeric, 0);
     return true;
@@ -165,6 +176,42 @@ async function ensureSharedAppServer() {
   return { pid, status: "started" };
 }
 
+function findRunningCyberbossPids() {
+  const pids = new Set();
+  try {
+    const result = require("child_process").execSync(
+      `tasklist /FI "IMAGENAME eq node.exe" /FO CSV /NH`,
+      { encoding: "utf8", timeout: 5000, windowsHide: true }
+    );
+    for (const line of result.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(",");
+      if (parts.length < 2) continue;
+      const pid = Number.parseInt(parts[1].replace(/"/g, ""), 10);
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      pids.add(pid);
+    }
+  } catch {
+    // ignore - won't detect orphans, PID file guard still applies
+  }
+  const cyberbossPids = [];
+  for (const pid of pids) {
+    try {
+      const cmdline = require("child_process").execSync(
+        `wmic process where ProcessId=${pid} get CommandLine /VALUE`,
+        { encoding: "utf8", timeout: 3000, windowsHide: true }
+      );
+      if (cmdline.includes("cyberboss.js")) {
+        cyberbossPids.push(pid);
+      }
+    } catch {
+      // skip this pid
+    }
+  }
+  return cyberbossPids;
+}
+
 function ensureBridgeNotRunning() {
   const pidFromFile = readPidFile(bridgePidFile);
   if (pidFromFile && isPidAlive(pidFromFile)) {
@@ -172,6 +219,17 @@ function ensureBridgeNotRunning() {
   }
   if (pidFromFile) {
     fs.rmSync(bridgePidFile, { force: true });
+  }
+  const orphans = findRunningCyberbossPids();
+  if (orphans.length > 0) {
+    console.error(`[shared] detected ${orphans.length} orphan cyberboss process(es) (PIDs: ${orphans.join(", ")}); killing them`);
+    for (const pid of orphans) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // ignore
+      }
+    }
   }
   return 0;
 }
