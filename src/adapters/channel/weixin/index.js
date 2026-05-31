@@ -286,23 +286,30 @@ function chunkReplyTextForWeixin(text, minChunk = DEFAULT_MIN_WEIXIN_CHUNK) {
     return chunkReplyText(normalized, MAX_WEIXIN_CHUNK);
   }
 
-  const units = splitTextAtBoundaries(normalized, boundaries);
+  const hardBoundaries = collectHardBoundaries(normalized);
+  const { units, hardBefore } = splitTextAtBoundariesWithHardBreaks(normalized, boundaries, hardBoundaries);
   if (!units.length) {
     return chunkReplyText(normalized, MAX_WEIXIN_CHUNK);
   }
 
   const chunks = [];
-  for (const unit of units) {
-    if (unit.length <= MAX_WEIXIN_CHUNK) {
-      chunks.push(unit);
+  const hb = [];
+  for (let i = 0; i < units.length; i += 1) {
+    if (units[i].length <= MAX_WEIXIN_CHUNK) {
+      chunks.push(units[i]);
+      hb.push(hardBefore[i]);
       continue;
     }
-    chunks.push(...chunkReplyText(unit, MAX_WEIXIN_CHUNK));
+    const sub = chunkReplyText(units[i], MAX_WEIXIN_CHUNK);
+    for (let j = 0; j < sub.length; j += 1) {
+      chunks.push(sub[j]);
+      hb.push(j === 0 && hardBefore[i]);
+    }
   }
-  return mergeShortChunks(chunks.filter(Boolean), MAX_WEIXIN_CHUNK, minChunk);
+  return mergeShortChunks(chunks.filter(Boolean), MAX_WEIXIN_CHUNK, minChunk, hb);
 }
 
-function mergeShortChunks(chunks, maxLength, minLength) {
+function mergeShortChunks(chunks, maxLength, minLength, hardBefore = []) {
   if (!chunks.length) {
     return chunks;
   }
@@ -310,6 +317,12 @@ function mergeShortChunks(chunks, maxLength, minLength) {
   let buffer = chunks[0];
   for (let index = 1; index < chunks.length; index += 1) {
     const chunk = chunks[index];
+    const isHardBreak = Array.isArray(hardBefore) && hardBefore[index];
+    if (isHardBreak) {
+      merged.push(buffer);
+      buffer = chunk;
+      continue;
+    }
     const isShort = buffer.length < minLength && chunk.length < minLength;
     const joined = `${buffer}${chunk}`;
     if (isShort && joined.length <= maxLength) {
@@ -390,6 +403,29 @@ function splitTextAtBoundaries(text, boundaries) {
   return units;
 }
 
+function splitTextAtBoundariesWithHardBreaks(text, boundaries, hardBoundaries) {
+  const units = [];
+  const hardBefore = [];
+  let start = 0;
+  for (const boundary of boundaries) {
+    if (boundary <= start) {
+      continue;
+    }
+    const unit = text.slice(start, boundary);
+    if (unit.trim()) {
+      hardBefore.push(units.length === 0 ? false : hardBoundaries.has(start));
+      units.push(unit);
+    }
+    start = boundary;
+  }
+  const tail = text.slice(start);
+  if (tail.trim()) {
+    hardBefore.push(units.length === 0 ? false : hardBoundaries.has(start));
+    units.push(tail);
+  }
+  return { units, hardBefore };
+}
+
 function findLastPreferredBoundary(text, maxBoundary = text.length, minBoundary = 0) {
   const boundaries = collectStreamingBoundaries(text);
   for (let index = boundaries.length - 1; index >= 0; index -= 1) {
@@ -442,6 +478,17 @@ function collectStreamingBoundaries(text) {
   return Array.from(boundaries).sort((left, right) => left - right);
 }
 
+function collectHardBoundaries(text) {
+  const boundaries = new Set();
+  const regex = /\n\s*\n+/g;
+  let match = regex.exec(text);
+  while (match) {
+    boundaries.add(match.index + match[0].length);
+    match = regex.exec(text);
+  }
+  return boundaries;
+}
+
 function findBoundaryPunctuationEnd(text, index) {
   const char = text[index];
   if (/[\u3002\uff01\uff1f!?]/u.test(char)) {
@@ -492,6 +539,7 @@ module.exports = {
   splitTextAtBoundaries,
   findLastPreferredBoundary,
   collectStreamingBoundaries,
+  collectHardBoundaries,
   findBoundaryPunctuationEnd,
   trimOuterBlankLines,
 };

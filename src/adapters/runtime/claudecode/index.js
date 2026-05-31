@@ -14,11 +14,14 @@ function createClaudeCodeRuntimeAdapter(config) {
   const pendingApprovals = new Map();
   const configuredModel = normalizeText(config.claudeModel);
   let globalListener = null;
-  const ipcSocketPath = path.join(
-    config.stateDir || path.join(os.homedir(), ".cyberboss"),
-    "claudecode-runtime.sock",
-  );
-  const ipcServer = new ClaudeCodeIpcServer({ socketPath: ipcSocketPath });
+  const IS_WINDOWS = os.platform() === "win32";
+  const ipcSocketPath = IS_WINDOWS
+    ? "\\\\.\\pipe\\cyberboss-claudecode"
+    : path.join(
+        config.stateDir || path.join(os.homedir(), ".cyberboss"),
+        "claudecode-runtime.sock",
+      );
+  const ipcServer = new ClaudeCodeIpcServer({ socketPath: ipcSocketPath, stateDir: config.stateDir });
 
   ipcServer.on("clientMessage", (msg) => {
     if (msg?.type === "sendUserMessage" && msg?.workspaceRoot) {
