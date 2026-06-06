@@ -1,0 +1,179 @@
+{
+  "project_meta": {
+    "name": "Cyberboss",
+    "description": "WeChat Agent Bridge for Personal Life Operations - 接入微信的本地生活 Agent Bridge",
+    "tech_stack": [
+      "JavaScript (Node.js >= 22)",
+      "WebSocket (ws)",
+      "Codex / Claude Code (可切换运行时)",
+      "MCP (Model Context Protocol)",
+      "Timeline-for-Agent (外部依赖)",
+      "Whereabouts-MCP (定位服务)",
+      "dotenv (配置管理)"
+    ],
+    "architecture": "Event-Driven Bridge Pattern with Pluggable Adapters",
+    "core_paradigm": "围绕事件流、会话线程、流式交付、任务队列构建的实时多源聚合系统"
+  },
+  "core_directory_map": {
+    "src/core/": "系统核心骨架 - 配置、应用启动、流传递、线程状态、消息分发",
+    "src/adapters/": "通道适配层 - runtime(Codex/Claude)和channel(WeChat)的双向协议翻译",
+    "src/services/": "业务服务层 - 日记、提醒、时间轴、贴纸、愿景处理",
+    "src/tools/": "Agent工具暴露层 - MCP服务端、项目工具定义、运行时上下文",
+    "src/app/": "应用协程 - 系统检查轮询、生命周期控制"
+  },
+  "execution_flow": {
+    "bootstrap": [
+      "src/index.js: 环境加载 -> 配置读取 -> bootstrap文件初始化",
+      "readConfig(): 三层级环境变量加载(项目.env -> ~/.cyberboss/.env -> shell)",
+      "CyberbossApp.start(): 初始化adapters、services、流状态"
+    ],
+    "primary_inbound_flow": [
+      "WeChat LongPoll -> ChannelAdapter.onInbound()",
+      "buildInboundDraft() -> 消息规范化、附件分类、视觉内容处理",
+      "StreamDelivery.handleRuntimeEvent() -> 事件队列分配回复目标",
+      "assembleRuntimeTurnText() -> 格式化为runtime输入(时间戳+上文+附件+视觉描述)",
+      "Runtime.request(threadId, turnText) -> 流式回复处理"
+    ],
+    "primary_outbound_flow": [
+      "StreamDelivery.handleRuntimeEvent(runtime.reply.delta) -> 流式聚合、去重",
+      "collectPendingReplyDeliveries() -> 分类plain_text/structured_action",
+      "sendTextWithRetry() -> 微信发送+自动重试+context_token刷新",
+      "isSystemReplyContextFailure(ret=-2) -> deferredSystemReply (推迟至下一条inbound)"
+    ]
+  },
+  "critical_components": [
+    {
+      "name": "CyberbossApp",
+      "path": "src/core/app.js",
+      "responsibility": "应用生命周期、初始化所有adapters/services、事件分发枢纽、登录/启动/诊断入口",
+      "key_methods": [
+        "start() // 启动WebSocket/HTTP服务、初始化微信长轮询、启动系统checkin定时器",
+        "onWeixinInbound(message) // 微信入站消息处理、转换为runtime turn",
+        "handleRuntimeEvent(event) // 运行时流式回复、提醒、系统消息分发",
+        "printDoctor() // 配置诊断、线程状态快照"
+      ]
+    },
+    {
+      "name": "StreamDelivery",
+      "path": "src/core/stream-delivery.js",
+      "responsibility": "运行时事件流->微信文本转换、stream去重聚合、retry/defer机制、context_token刷新",
+      "key_methods": [
+        "handleRuntimeEvent(event) // 根据事件类型(turn.started/reply.delta/reply.completed)更新状态",
+        "flush(state, {force}) // 强制或按需发送pending deliveries",
+        "sendTextWithRetry(payload) // 一次重试+context_token刷新+defer fallback",
+        "resolveSystemReplyDelivery(text, policy) // 区分silent/send_message/invalid"
+      ]
+    },
+    {
+      "name": "ProjectToolHost",
+      "path": "src/tools/tool-host.js",
+      "responsibility": "Agent工具枚举、调用分发、schema验证、上下文解析",
+      "key_methods": [
+        "listTools() // 返回PROJECT_TOOLS + WhereaboutsToolHost工具",
+        "invokeTool(toolName, args, context) // schema校验+handler分发+错误处理",
+        "resolveContext(context) // 从runtimeContextStore推导workspace/thread/account"
+      ]
+    },
+    {
+      "name": "ChannelAdapter(WeChat)",
+      "path": "src/adapters/channel/weixin/",
+      "responsibility": "微信API HTTP协议、长轮询同步、登录管理、消息收发、context_token维护",
+      "key_methods": [
+        "onInbound() // 长轮询拉取消息、并发限制、sync-buffer管理",
+        "sendText(payload) // POST /message/send、错误分类、ret=-2检测",
+        "getKnownContextTokens() // 返回userId->contextToken映射"
+      ]
+    },
+    {
+      "name": "RuntimeAdapter(Codex/Claude)",
+      "path": "src/adapters/runtime/",
+      "responsibility": "本地runtime命令行启动、WebSocket/pipe协议通信、事件流式接收、turn隔离",
+      "key_methods": [
+        "spawnRuntime(config) // 启动private runtime或连接shared app-server",
+        "onRuntimeEvent(event) // 监听runtime.turn.started/.reply.delta/.reply.completed/.turn.failed",
+        "request(threadId, text) // 发送turn请求、返回Promise"
+      ]
+    },
+    {
+      "name": "SystemCheckinPoller",
+      "path": "src/app/system-checkin-poller.js",
+      "responsibility": "随机轮询唤醒触发、Checkin间隔管理、可调整频率",
+      "key_methods": [
+        "runSystemCheckinPoller() // 按配置间隔触发system消息队列",
+        "randomCheckinTrigger() // 生成随机checkin事件"
+      ]
+    },
+    {
+      "name": "ReminderService",
+      "path": "src/services/reminder-service.js",
+      "responsibility": "提醒队列持久化、时间计算(相对/绝对)、发送者解析",
+      "key_methods": [
+        "create({text, delayMinutes, dueAt}) // 验证时间+发送者+context_token->入队",
+        "resolveDueAtMs() // 支持delay字符串(1h30m)、ISO8601、分钟数"
+      ]
+    },
+    {
+      "name": "TimelineService",
+      "path": "src/services/timeline-service.js",
+      "responsibility": "与timeline-for-agent交互、事件写入、截图生成",
+      "key_methods": [
+        "write(args) // 转发timeline-for-agent API、事件日期/分类/tag管理",
+        "captureScreenshot(args) // 调用Chrome/Edge headless、指定selector和范围"
+      ]
+    },
+    {
+      "name": "StickerService",
+      "path": "src/services/sticker-service.js",
+      "responsibility": "表情包GIF入库、标签索引、图片规范化、去重",
+      "key_methods": [
+        "saveFromInbox(items, context) // 转换格式为GIF、写入tags.json、去重检测",
+        "pick(tag, limit) // 标签检索、返回候选stickerId列表"
+      ]
+    },
+    {
+      "name": "ThreadStateStore",
+      "path": "src/core/thread-state-store.js",
+      "responsibility": "线程元数据持久化、binding(workspaceRoot+accountId+threadId)、模型/权限状态",
+      "key_methods": [
+        "save(threadId, state) // 写入sessions.json",
+        "findBindingForThreadId(threadId) // workspace->thread映射"
+      ]
+    }
+  ],
+  "state_and_data": {
+    "global_state": [
+      "replyTargetByBindingKey: Map<bindingKey -> {userId, contextToken, provider}>",
+      "replyTargetQueueByThreadId: Map<threadId -> target队列>",
+      "stateByRunKey: Map<'threadId:turnId' -> 流状态对象>",
+      "runtimeContextStore: {runtimeId, workspaceRoot, threadId, accountId} (MCP调用上下文)"
+    ],
+    "db_schemas": [
+      "sessions.json: [{workspaceRoot, workspaceId, threadId, accountId, runtimeId, model, ...}]",
+      "reminder-queue.json: [{id, accountId, senderId, contextToken, text, dueAtMs, ...}]",
+      "system-message-queue.json: [{id, text, kind, workspaceRoot, userId, ...}]",
+      "checkin-config.json: {minDelayMs, maxDelayMs}",
+      "weixin-config.json: {accountId, wxuin, accessToken, ...}",
+      "stickers/tags.json: [{tag, desc}, ...]",
+      "stickers/index.json: [{stickerId, tags, desc, assetPath}, ...]",
+      "locations.json: [{lat, lng, accuracy, timestamp, battery, ...}]",
+      "diary/YYYY-MM-DD.md: 日记文本",
+      "timeline/: timeline-for-agent维护的事件库"
+    ]
+  },
+  "potential_weaknesses": [
+    "StreamDelivery中markdown转plain_text的正则简陋，复杂格式可能误转换",
+    "context_token刷新机制依赖ChannelAdapter.getKnownContextTokens()，若微信侧token过期可能retry失败",
+    "无全局锁保护并发turn处理，多个threadId同时请求时replyTargetQueue可能竞态",
+    "WeChat LongPoll无背压控制，高流量时sync-buffer可能堆积",
+    "RuntimeAdapter与runtime进程通信缺少heartbeat，僵尸进程无自动恢复",
+    "ReminderService的dueAtMs > Date.now()校验未考虑系统时钟跳变",
+    "StickerService的GIF规范化依赖外部脚本(scripts/normalize-sticker-gif.js)，失败处理不完整",
+    "TimelineService.captureScreenshot()的Chrome/Chromium启动路径硬编码，跨平台适配不足",
+    "buildMergedInboundPrepared()中multi-message合并无序列号保证，可能乱序",
+    "缺少explicit error boundary和graceful shutdown，某个adapter崩溃可能导致全流程中断",
+    "Session文件并发写入无原子操作，高频修改可能corruption",
+    "MCP工具的accessControl没有per-workspace权限隔离，仅依赖context推导",
+    "缺少内存泄漏防御：stateByRunKey.delete()依赖主动调用，流异常中断时状态无清理",
+    "TODO: Codex adapter协议泄露检测(sanitizeProtocolLeakText)仅过滤已知pattern，新型泄露无防护"
+  ]
+}
