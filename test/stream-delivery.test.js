@@ -126,6 +126,44 @@ test("system send_message JSON may be wrapped in a json fence", async () => {
   }]);
 });
 
+test("codex system reply accepts trailing send_message JSON after plain text prefix", async () => {
+  const { sent, streamDelivery } = createHarness({ runtimeId: "codex" });
+  streamDelivery.queueReplyTargetForThread("thread-2p", {
+    userId: "user-2p",
+    contextToken: "ctx-2p",
+    provider: "system",
+  });
+
+  await runCompletedTurnWithResultOnly(streamDelivery, {
+    threadId: "thread-2p",
+    turnId: "turn-2p",
+    text: "I will note the user's current status first.\n\n{\"action\":\"send_message\",\"message\":\"still deploying?\"}",
+  });
+
+  assert.deepEqual(sent, [{
+    userId: "user-2p",
+    text: "still deploying?",
+    contextToken: "ctx-2p",
+  }]);
+});
+
+test("codex system reply rejects trailing plain text after JSON action", async () => {
+  const { sent, streamDelivery } = createHarness({ runtimeId: "codex" });
+  streamDelivery.queueReplyTargetForThread("thread-2q", {
+    userId: "user-2q",
+    contextToken: "ctx-2q",
+    provider: "system",
+  });
+
+  await runCompletedTurnWithResultOnly(streamDelivery, {
+    threadId: "thread-2q",
+    turnId: "turn-2q",
+    text: "{\"action\":\"send_message\",\"message\":\"still deploying?\"}\n\nextra trailing text",
+  });
+
+  assert.deepEqual(sent, []);
+});
+
 test("codex system reply rejects plain text", async () => {
   const { sent, streamDelivery } = createHarness({ runtimeId: "codex" });
   streamDelivery.queueReplyTargetForThread("thread-2c", {
