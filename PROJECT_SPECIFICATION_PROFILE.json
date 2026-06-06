@@ -175,5 +175,7 @@
     "MCP工具的accessControl没有per-workspace权限隔离，仅依赖context推导",
     "缺少内存泄漏防御：stateByRunKey.delete()依赖主动调用，流异常中断时状态无清理",
     "TODO: Codex adapter协议泄露检测(sanitizeProtocolLeakText)仅过滤已知pattern，新型泄露无防护"
-  ]
+  ],
+  "last_updated": "2026-06-06T06:06:23Z",
+  "updated_by": "git-hook"
 }
