@@ -177,6 +177,7 @@ async function ensureSharedAppServer() {
 }
 
 function findRunningCyberbossPids() {
+  // Step 1: get all node PIDs via tasklist (works on all Windows versions)
   const pids = new Set();
   try {
     const result = require("child_process").execSync(
@@ -189,19 +190,29 @@ function findRunningCyberbossPids() {
       const parts = trimmed.split(",");
       if (parts.length < 2) continue;
       const pid = Number.parseInt(parts[1].replace(/"/g, ""), 10);
-      if (!Number.isInteger(pid) || pid <= 0) continue;
-      pids.add(pid);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
     }
   } catch {
-    // ignore - won't detect orphans, PID file guard still applies
+    return [];
   }
+
+  if (pids.size === 0) return [];
+
+  // Step 2: filter to cyberboss.js processes via PowerShell (wmic removed in Win11)
   const cyberbossPids = [];
   for (const pid of pids) {
     try {
-      const cmdline = require("child_process").execSync(
-        `wmic process where ProcessId=${pid} get CommandLine /VALUE`,
-        { encoding: "utf8", timeout: 3000, windowsHide: true }
+      // Use spawnSync with args array to avoid cmd.exe shell interpretation of | and quotes
+      const result = require("child_process").spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' | Select-Object -ExpandProperty CommandLine`,
+        ],
+        { encoding: "utf8", timeout: 5000, windowsHide: true }
       );
+      const cmdline = (result.stdout || "").trim();
       if (cmdline.includes("cyberboss.js")) {
         cyberbossPids.push(pid);
       }
@@ -209,7 +220,8 @@ function findRunningCyberbossPids() {
       // skip this pid
     }
   }
-  return cyberbossPids;
+  // Safety: never return the current process PID to prevent suicide
+  return cyberbossPids.filter(pid => pid !== process.pid);
 }
 
 function ensureBridgeNotRunning() {
@@ -225,7 +237,7 @@ function ensureBridgeNotRunning() {
     console.error(`[shared] detected ${orphans.length} orphan cyberboss process(es) (PIDs: ${orphans.join(", ")}); killing them`);
     for (const pid of orphans) {
       try {
-        process.kill(pid, "SIGKILL");
+        killPidTree(pid);
       } catch {
         // ignore
       }
@@ -323,6 +335,35 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function killPidTree(pid) {
+  const numeric = Number(pid);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    return false;
+  }
+  if (numeric === process.pid) {
+    console.warn('[cyberboss] FATAL PREVENTED: killPidTree called with current process PID! Refusing to suicide.');
+    return false;
+  }
+  if (process.platform === "win32") {
+    try {
+      require("child_process").execSync(`taskkill /F /T /PID ${numeric}`, {
+        encoding: "utf8",
+        timeout: 5000,
+        windowsHide: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    process.kill(numeric, "SIGTERM");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   rootDir,
   port,
@@ -334,6 +375,7 @@ module.exports = {
   appServerLogFile,
   ensureLogDir,
   isPidAlive,
+  killPidTree,
   readPidFile,
   writePidFile,
   removePidFileIfMatches,

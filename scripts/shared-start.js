@@ -7,6 +7,7 @@ const {
   removePidFileIfMatches,
   ensureSharedAppServer,
   ensureBridgeNotRunning,
+  killPidTree,
 } = require("./shared-common");
 
 const MAX_BACKOFF_MS = 60_000;
@@ -47,7 +48,7 @@ async function main() {
   const shutdown = () => {
     shuttingDown = true;
     if (currentChild && !currentChild.killed) {
-      currentChild.kill("SIGTERM");
+      killPidTree(currentChild.pid);
     }
   };
 

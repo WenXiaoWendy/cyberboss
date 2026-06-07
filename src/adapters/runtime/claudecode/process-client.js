@@ -32,7 +32,11 @@ class ClaudeCodeProcessClient {
 
   emit(event, raw) {
     if (this.ipcServer) {
-      this.ipcServer.broadcast({ type: "processEvent", event, raw });
+      try {
+        this.ipcServer.broadcast({ type: "processEvent", event, raw });
+      } catch (err) {
+        console.error(`[claudecode-runtime] ipc broadcast failed: ${err.message}`);
+      }
     }
     for (const listener of this.listeners) {
       try {
@@ -73,6 +77,27 @@ class ClaudeCodeProcessClient {
     this.stdin = child.stdin;
     this.alive = true;
 
+    child.on('error', (err) => {
+        console.error('[claudecode-runtime] FATAL SPAWN ERROR:', err);
+    });
+
+    child.on('exit', (code, signal) => {
+        console.log(`[claudecode-runtime] Child process exited with code=${code} signal=${signal}`);
+    });
+
+    if (child.stderr) {
+        child.stderr.on('data', (data) => {
+            console.error(`[claudecode-runtime] STDERR: ${data.toString()}`);
+        });
+    }
+
+    // Catch EPIPE / closed-pipe errors so they don't crash the process
+    child.stdin.on("error", (err) => {
+      if (err && err.code !== "EPIPE") {
+        console.error(`[claudecode-runtime] stdin error: ${err.message}`);
+      }
+    });
+
     child.stdout.on("data", (chunk) => {
       this.stdoutBuffer += chunk.toString("utf8");
       const lines = this.stdoutBuffer.split("\n");
@@ -87,7 +112,7 @@ class ClaudeCodeProcessClient {
       if (text) {
         console.error(`[claudecode-runtime] stderr: ${text}`);
         if (this.ipcServer && !isPotentiallySensitive(text)) {
-          this.ipcServer.broadcast({ type: "stderr", text });
+          try { this.ipcServer.broadcast({ type: "stderr", text }); } catch {}
         }
       }
     });
@@ -132,6 +157,7 @@ class ClaudeCodeProcessClient {
         }
         break;
       case "assistant":
+      case "assistant.text":
         this.handleAssistant(raw);
         break;
       case "user":
@@ -159,13 +185,24 @@ class ClaudeCodeProcessClient {
       }, raw);
     }
     const content = raw?.message?.content;
-    if (!Array.isArray(content)) return;
+    if (!Array.isArray(content)) {
+      // Fallback: assistant.text may carry text at the top level
+      if (typeof raw.text === "string" && raw.text.trim()) {
+        this.emit({
+          type: "reply.completed",
+          text: raw.text.trim(),
+          turnId: this.pendingTurnId,
+          sessionId: this.activeThreadId || this.sessionId,
+        }, raw);
+      }
+      return;
+    }
     for (const item of content) {
       if (!item || typeof item !== "object") continue;
       const itemType = item.type;
       if (itemType === "text" && typeof item.text === "string" && item.text) {
         this.emit({
-          type: "assistant.text",
+          type: "reply.completed",
           text: item.text.trim(),
           turnId: this.pendingTurnId,
           sessionId: this.activeThreadId || this.sessionId,
@@ -279,17 +316,29 @@ class ClaudeCodeProcessClient {
     this.pendingTurnId = `turn-${Date.now()}`;
     this.activeThreadId = threadId || this.sessionId;
     if (this.ipcServer) {
-      this.ipcServer.broadcast({
-        type: "inboundMessage",
-        workspaceRoot: this.workspaceRoot,
-        text,
-      });
+      try {
+        this.ipcServer.broadcast({
+          type: "inboundMessage",
+          workspaceRoot: this.workspaceRoot,
+          text,
+        });
+      } catch {}
     }
     const payload = JSON.stringify({
       type: "user",
       message: { role: "user", content: text },
     });
-    this.stdin.write(payload + "\n");
+    try {
+      const ok = this.stdin.write(payload + "\n");
+      if (!ok) {
+        // Backpressure — drain before continuing to avoid buffer bloat
+        await new Promise((resolve) => this.stdin.once("drain", resolve));
+      }
+    } catch (err) {
+      throw new Error(
+        `claudecode stdin write failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     this.emit({
       type: "turn.started",
       turnId: this.pendingTurnId,
@@ -346,14 +395,32 @@ class ClaudeCodeProcessClient {
       ]);
     }
     if (this.child && !this.child.killed) {
-      this.child.kill("SIGTERM");
+      try {
+        const { killPidTree } = require("../../../core/process-utils");
+        if (this.child.pid !== process.pid) {
+          killPidTree(this.child.pid);
+        } else {
+          console.warn('[cyberboss] FATAL PREVENTED: child.pid matches main process! Skipping killPidTree in close().');
+        }
+      } catch {
+        // fall through to cleanup
+      }
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, 3000)),
         new Promise((resolve) => this.child.once("close", resolve)),
       ]);
     }
     if (this.child && !this.child.killed) {
-      this.child.kill("SIGKILL");
+      try {
+        const { killPidTree } = require("../../../core/process-utils");
+        if (this.child.pid !== process.pid) {
+          killPidTree(this.child.pid);
+        } else {
+          console.warn('[cyberboss] FATAL PREVENTED: child.pid matches main process! Skipping killPidTree in close().');
+        }
+      } catch {
+        // fall through to cleanup
+      }
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, 1000)),
         new Promise((resolve) => this.child.once("close", resolve)),
