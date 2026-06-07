@@ -24,7 +24,7 @@
     "shared:open": "node ./scripts/shared-open.js",
     "shared:status": "node ./scripts/shared-status.js",
     "check": "node --check ./src/index.js && node --check ./src/core/config.js && node --check ./src/core/app.js && node --check ./src/core/inbound-turn.js && node --check ./src/core/default-targets.js && node --check ./src/core/stream-delivery.js && node --check ./src/adapters/channel/weixin/index.js",
-    "postinstall": "bash .githooks/setup.sh || true"
+
   },
   "dependencies": {
     "dotenv": "^16.4.7",
