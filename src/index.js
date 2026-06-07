@@ -72,6 +72,61 @@ function printHelp() {
   console.log(buildTerminalHelpText());
 }
 
+/**
+ * 写 PID 文件前，检查旧 PID 是否对应一个仍活着、且不是当前进程父进程的进程。
+ * 满足条件才杀，避免误杀 shared-start.js 或无关进程。
+ */
+function killStalePidIfSafe(pidFile) {
+  let oldPid;
+  try {
+    const raw = fs.readFileSync(pidFile, "utf8").trim();
+    oldPid = parseInt(raw, 10);
+  } catch {
+    return; // 文件不存在或读取失败，正常情况
+  }
+
+  if (!oldPid || isNaN(oldPid)) {
+    return;
+  }
+
+  if (oldPid === process.pid) {
+    console.warn(`[cyberboss] WARN: old claude PID matches current process PID. Skipping taskkill to prevent suicide.`);
+    return;
+  }
+
+  // 安全检查1：不杀父进程（shared-start.js 就是父进程）
+  if (oldPid === process.ppid) {
+    console.log(`[cyberboss] PID 文件中的旧 PID ${oldPid} 是当前父进程，跳过`);
+    return;
+  }
+
+  // 安全检查2：确认进程确实还活着（发送信号0探测，不实际kill）
+  let alive = false;
+  try {
+    // Windows 上 process.kill(pid, 0) 能探测进程是否存在
+    process.kill(oldPid, 0);
+    alive = true;
+  } catch (e) {
+    // Windows: 对非父子进程抛 EPERM 表示进程存在，ESRCH 表示进程已死
+    alive = e.code === "EPERM";
+  }
+
+  if (!alive) {
+    return; // 旧进程已死，直接覆写 PID 文件即可
+  }
+
+  // 两个检查都通过，旧进程还活着且不是父进程，杀掉
+  console.log(`[cyberboss] 发现残留主进程 PID ${oldPid}，正在清理...`);
+  try {
+    const { execFileSync } = require("child_process");
+    execFileSync("taskkill", ["/F", "/T", "/PID", String(oldPid)], { stdio: "ignore" });
+    console.log(`[cyberboss] 已清理残留进程 PID ${oldPid}`);
+  } catch (e) {
+    // 杀失败不崩，继续启动
+    console.warn(`[cyberboss] 清理残留进程 ${oldPid} 失败: ${e.message}`);
+  }
+}
+
 let runtimeErrorHooksInstalled = false;
 
 function installRuntimeErrorHooks() {
@@ -80,18 +135,29 @@ function installRuntimeErrorHooks() {
   }
   runtimeErrorHooksInstalled = true;
 
-  process.on("unhandledRejection", (reason) => {
+  const crashLogPath = path.join(os.homedir(), ".cyberboss", "crash.log");
+
+  process.on("unhandledRejection", (reason, promise) => {
     const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
-    console.error(`[cyberboss] unhandled rejection ${message}`);
-    try { fs.appendFileSync(path.join(os.homedir(), ".cyberboss", "crash.log"), `[${new Date().toISOString()}] unhandledRejection ${message}\n`); } catch {}
-    process.exit(1);
+    const fullMessage = `unhandledRejection: ${message}`;
+    console.error(`[cyberboss] FATAL ${fullMessage}`);
+    try {
+      fs.appendFileSync(crashLogPath, `[${new Date().toISOString()}] ${fullMessage}\n`);
+      fs.appendFileSync(crashLogPath, `  reason: ${JSON.stringify(String(reason))}\n`);
+    } catch {}
+    process.stderr.write(`[cyberboss] FATAL ${fullMessage}\n`);
+    setTimeout(() => process.exit(1), 100);
   });
 
   process.on("uncaughtException", (error) => {
     const message = error instanceof Error ? error.stack || error.message : String(error);
-    console.error(`[cyberboss] uncaught exception ${message}`);
-    try { fs.appendFileSync(path.join(os.homedir(), ".cyberboss", "crash.log"), `[${new Date().toISOString()}] uncaughtException ${message}\n`); } catch {}
-    process.exit(1);
+    const fullMessage = `uncaughtException: ${message}`;
+    console.error(`[cyberboss] FATAL ${fullMessage}`);
+    try {
+      fs.appendFileSync(crashLogPath, `[${new Date().toISOString()}] ${fullMessage}\n`);
+    } catch {}
+    process.stderr.write(`[cyberboss] FATAL ${fullMessage}\n`);
+    setTimeout(() => process.exit(1), 100);
   });
 }
 
@@ -99,6 +165,9 @@ async function main() {
   loadEnv();
   ensureRuntimeEnv();
   installRuntimeErrorHooks();
+
+  ensureDefaultStateDirectory();
+
   const argv = process.argv.slice(2);
   const config = readConfig();
   ensureBootstrapFiles(config);
@@ -132,6 +201,12 @@ async function main() {
   }
 
   if (command === "start") {
+    const pidFile = path.join(os.homedir(), ".cyberboss", "cyberboss.pid");
+    killStalePidIfSafe(pidFile);
+    fs.writeFileSync(pidFile, String(process.pid));
+    process.on("exit", () => {
+      try { fs.unlinkSync(pidFile); } catch {}
+    });
     await getApp().start();
     return;
   }
@@ -147,7 +222,7 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-module.exports = { main };
+module.exports = { main, killStalePidIfSafe };
 
 function readFlagValue(args, flag) {
   if (!Array.isArray(args)) {
