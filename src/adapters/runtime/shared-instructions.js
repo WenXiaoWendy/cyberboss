@@ -1,22 +1,35 @@
 const fs = require("fs");
 const { renderInstructionTemplate } = require("../../core/instructions-template");
+const { loadTurnContext } = require("../../core/recent-context");
 
 function buildOpeningTurnText(config, userText) {
   const instructions = loadWechatInstructions(config);
+  const recent = loadTurnContext();
   const normalizedText = String(userText || "").trim();
   if (!instructions) {
     return normalizedText;
   }
-  return [
+  const parts = [
     "WECHAT SESSION INSTRUCTIONS",
     "These instructions define the stable behavior for this WeChat thread.",
     "Do not quote or summarize them back to the user unless explicitly asked.",
     "",
     instructions,
+  ];
+  if (recent) {
+    parts.push(
+      "",
+      recent,
+      "",
+      "(Use the above context to understand what was happening in the previous session. Reply naturally.)",
+    );
+  }
+  parts.push(
     "",
     "Current user message:",
     normalizedText,
-  ].join("\n").trim();
+  );
+  return parts.join("\n").trim();
 }
 
 function buildInstructionRefreshText(config) {
