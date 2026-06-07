@@ -19,6 +19,7 @@ const {
   takeImageOnlyBatchMessages,
 } = require("./inbound-turn");
 const { resolveVisionContext } = require("../services/vision-context");
+const { saveTurnContext, saveAssistantContext } = require("./recent-context");
 const {
   buildWeixinHelpText,
 } = require("./command-registry");
@@ -31,6 +32,7 @@ const { SystemMessageQueueStore } = require("./system-message-queue-store");
 const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
 const { TurnGateStore } = require("./turn-gate-store");
+const { createMessageDebouncer } = require("./message-debounce");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const {
   matchesCommandPrefix,
@@ -83,6 +85,7 @@ class CyberbossApp {
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
     this.turnTimeouts = new Map();
+    this.messageDebouncer = null;
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -157,7 +160,20 @@ class CyberbossApp {
       });
     }
 
+    const crashLogPath = path.join(os.homedir(), ".cyberboss", "crash.log");
+    this.messageDebouncer = createMessageDebouncer({
+      timeoutMs: 5000,
+      maxWaitMs: 30_000,
+      crashLogPath,
+      onFlush: (merged) =>
+        this.handlePreparedMessage(merged, { allowCommands: true }).catch((error) => {
+          console.error(`[cyberboss] message-debounce onFlush failed: ${error.message}`);
+        }),
+    });
+    console.log("[cyberboss] message-debounce: timeoutMs=5000 maxWaitMs=30000");
+
     const shutdown = createShutdownController(async () => {
+      this.messageDebouncer?.destroy();
       this.clearPendingImageInboundTimers();
       await this.closeLocationServer();
       await this.runtimeAdapter.close();
@@ -331,7 +347,12 @@ class CyberbossApp {
     }
 
     this.primeDeferredRepliesForSender(normalized);
-    await this.handlePreparedMessage(normalized, { allowCommands: true });
+
+    const result = await this.messageDebouncer.enqueue(normalized.senderId, normalized);
+    console.log(`[cyberboss] debounce route userId=${normalized.senderId} enqueued=${result.enqueued} text="${String(normalized.text || "").slice(0, 40)}"`);
+    if (!result.enqueued) {
+      await this.handlePreparedMessage(normalized, { allowCommands: true });
+    }
   }
 
   deferSystemReply({ threadId = "", userId = "", text = "", error = null, kind = "plain_reply" }) {
@@ -509,6 +530,7 @@ class CyberbossApp {
         this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
       }
       this.scheduleTurnTimeout({ bindingKey, workspaceRoot, threadId: turn.threadId, turnId: turn.turnId });
+      saveTurnContext(prepared.text);
       return true;
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
@@ -1539,6 +1561,9 @@ class CyberbossApp {
         })
       : null;
     await this.streamDelivery.handleRuntimeEvent(event);
+    if (event.type === "runtime.turn.completed" && event.payload?.text) {
+      saveAssistantContext(event.payload.text);
+    }
     if (!event) {
       return;
     }

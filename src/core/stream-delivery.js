@@ -102,6 +102,19 @@ class StreamDelivery {
     return normalizeReplyTarget(this.replyTargetByBindingKey.get(linked.bindingKey));
   }
 
+  extractReplyText(threadId, turnId) {
+    const normalizedThreadId = normalizeText(threadId);
+    const normalizedTurnId = normalizeText(turnId);
+    let state = this.stateByRunKey.get(buildRunKey(normalizedThreadId, normalizedTurnId));
+    if (!state) {
+      state = this.stateByRunKey.get(buildRunKey(normalizedThreadId, ""));
+    }
+    if (!state || !state.itemOrder.length) {
+      return "";
+    }
+    return buildReplyText(state, { completedOnly: true });
+  }
+
   async handleRuntimeEvent(event) {
     const threadId = normalizeText(event?.payload?.threadId);
     const turnId = normalizeText(event?.payload?.turnId);

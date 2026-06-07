@@ -92,6 +92,14 @@ function createClaudeCodeRuntimeAdapter(config) {
       }
       if (mapped?.type === "runtime.turn.failed") {
         clientsByWorkspace.delete(workspaceRoot);
+        // Resume/startup failure (no active turn) — clear bad thread IDs so
+        // restarts don't retry the same broken session.
+        if (!mapped.payload?.turnId) {
+          for (const binding of sessionStore.listBindings()) {
+            sessionStore.clearThreadIdForWorkspace(binding.bindingKey, workspaceRoot);
+          }
+          return; // nothing to forward — no user is waiting on this
+        }
       }
       if (mapped && globalListener) {
         globalListener(mapped, raw);
@@ -284,6 +292,7 @@ function createClaudeCodeRuntimeAdapter(config) {
       const { client, threadId: activeThreadId } = attached;
       const outboundText = openingTurn ? buildOpeningTurnText(config, text) : text;
       const outboundThreadId = activeThreadId || threadId;
+      console.error(`[cyberboss] claudecode sendTurn opening=${openingTurn} threadId=${outboundThreadId} preview=${String(text || "").slice(0, 80).replace(/\n/g, "\\n")}`);
       if (outboundThreadId) {
         sessionStore.setThreadIdForWorkspace(
           bindingKey,

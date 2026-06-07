@@ -22,6 +22,7 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
         },
       };
     case "reply.completed":
+    case "assistant.text":
       return {
         type: "runtime.reply.completed",
         payload: {
@@ -32,6 +33,7 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
         },
       };
     case "turn.completed":
+    case "result":
       return {
         type: "runtime.turn.completed",
         payload: {
