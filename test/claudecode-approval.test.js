@@ -207,7 +207,7 @@ test("claudecode adapter dispatches turns only after a real session id is availa
   }
 });
 
-test("claudecode process client treats assistant text as non-deliverable until the result event", () => {
+test("claudecode process client delivers assistant text items and supports dual event type compatibility", () => {
   const client = new ClaudeCodeProcessClient({
     command: "claude",
     cwd: "/workspace",
@@ -237,16 +237,37 @@ test("claudecode process client treats assistant text as non-deliverable until t
   });
 
   assert.deepEqual(messages.map((entry) => entry.event.type), [
-    "assistant.text",
+    "reply.completed",
     "tool.use",
     "turn.completed",
   ]);
-  assert.equal(mapClaudeCodeMessageToRuntimeEvent(messages[0].event, messages[0].raw), null);
+  // reply.completed maps to runtime.reply.completed
+  const replyCompleted = mapClaudeCodeMessageToRuntimeEvent(messages[0].event, messages[0].raw);
+  assert.equal(replyCompleted.type, "runtime.reply.completed");
+  assert.equal(replyCompleted.payload.text, "我先查一下。");
+
+  // turn.completed maps to runtime.turn.completed
   const completed = mapClaudeCodeMessageToRuntimeEvent(messages[2].event, messages[2].raw);
   assert.equal(completed.type, "runtime.turn.completed");
   assert.equal(completed.payload.threadId, "thread-tool");
   assert.equal(completed.payload.turnId, "turn-tool");
   assert.equal(completed.payload.text, "查完了，这是工具后的最终结果。");
+
+  // assistant.text event type also maps to runtime.reply.completed (dual compatibility)
+  const assistantTextMapped = mapClaudeCodeMessageToRuntimeEvent(
+    { type: "assistant.text", text: "hello", sessionId: "s1", turnId: "t1" },
+    null,
+  );
+  assert.equal(assistantTextMapped.type, "runtime.reply.completed");
+  assert.equal(assistantTextMapped.payload.text, "hello");
+
+  // result event type also maps to runtime.turn.completed (dual compatibility)
+  const resultMapped = mapClaudeCodeMessageToRuntimeEvent(
+    { type: "result", text: "done", sessionId: "s2", turnId: "t2" },
+    null,
+  );
+  assert.equal(resultMapped.type, "runtime.turn.completed");
+  assert.equal(resultMapped.payload.text, "done");
 });
 
 test("claudecode runtime params are isolated from codex model selections", () => {
