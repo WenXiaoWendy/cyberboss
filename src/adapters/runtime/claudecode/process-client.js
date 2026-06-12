@@ -298,7 +298,22 @@ class ClaudeCodeProcessClient {
 
   handleControlRequest(raw) {
     const request = raw?.request || {};
-    if (request.subtype !== "can_use_tool") return;
+    if (request.subtype !== "can_use_tool") {
+      // Don't silently drop unknown control_request subtypes.
+      // Auto-deny so claude doesn't hang waiting for a response.
+      const reason = request.subtype
+        ? `unknown control_request subtype: ${request.subtype}`
+        : "unknown control_request without subtype";
+      console.error(`[claudecode-runtime] ${reason} — auto-denying`);
+      try {
+        require("fs").appendFileSync(
+          "D:/cyberboss-app/crash-ck.txt",
+          `${Date.now()} control_request auto-deny subtype=${request.subtype || "(none)"} requestId=${raw.request_id}\n`
+        );
+      } catch {}
+      this.sendResponse(raw.request_id, { decision: "decline" }).catch(() => {});
+      return;
+    }
     this.emit({
       type: "approval.requested",
       requestId: raw.request_id,

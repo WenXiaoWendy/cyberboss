@@ -450,7 +450,19 @@ class CyberbossApp {
 
   scheduleTurnTimeout({ bindingKey, workspaceRoot, threadId, turnId }) {
     this.clearTurnTimeout(threadId);
+    try {
+      require("fs").appendFileSync(
+        "D:/cyberboss-app/crash-ck.txt",
+        `${Date.now()} turn-timeout-armed threadId=${threadId} turnId=${turnId}\n`
+      );
+    } catch {}
     const timeout = setTimeout(async () => {
+      try {
+        require("fs").appendFileSync(
+          "D:/cyberboss-app/crash-ck.txt",
+          `${Date.now()} turn-timeout-FIRED threadId=${threadId} turnId=${turnId}\n`
+        );
+      } catch {}
       console.error(`[cyberboss] turn timeout thread=${threadId} turn=${turnId} — cancelling`);
       try {
         await this.runtimeAdapter.cancelTurn({ threadId, turnId, workspaceRoot });
@@ -475,6 +487,12 @@ class CyberbossApp {
   clearTurnTimeout(threadId) {
     const timeout = this.turnTimeouts.get(threadId);
     if (timeout) {
+      try {
+        require("fs").appendFileSync(
+          "D:/cyberboss-app/crash-ck.txt",
+          `${Date.now()} turn-timeout-cleared threadId=${threadId}\n`
+        );
+      } catch {}
       clearTimeout(timeout);
       this.turnTimeouts.delete(threadId);
     }
@@ -1461,6 +1479,22 @@ class CyberbossApp {
       this.runtimeAdapter.getSessionStore().rememberApprovalPrefixForWorkspace(workspaceRoot, approval.commandTokens);
     }
     this.threadStateStore.resolveApproval(threadId, "running");
+    // Re-arm 2-min orphan kill timer after manual approval so post-approval tool execution is protected
+    const resolvedState = this.threadStateStore.getThreadState(threadId);
+    if (resolvedState?.turnId && bindingKey && workspaceRoot) {
+      try {
+        require("fs").appendFileSync(
+          "D:/cyberboss-app/crash-ck.txt",
+          `${Date.now()} re-arm-turn-timeout manual-approve threadId=${threadId} turnId=${resolvedState.turnId}\n`
+        );
+      } catch {}
+      this.scheduleTurnTimeout({
+        bindingKey,
+        workspaceRoot,
+        threadId,
+        turnId: resolvedState.turnId,
+      });
+    }
     const text = buildApprovalResponseText(approval, command.name, approvalResponse);
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
@@ -1676,6 +1710,22 @@ class CyberbossApp {
     }
     await this.runtimeAdapter.respondApproval(approvalResponse).catch(() => {});
     this.threadStateStore.resolveApproval(event.payload.threadId, "running");
+    // Re-arm 2-min orphan kill timer after auto-approval so post-approval tool execution is protected
+    const resolvedState = this.threadStateStore.getThreadState(event.payload.threadId);
+    if (resolvedState?.turnId && linked?.bindingKey && linked?.workspaceRoot) {
+      try {
+        require("fs").appendFileSync(
+          "D:/cyberboss-app/crash-ck.txt",
+          `${Date.now()} re-arm-turn-timeout auto-approve threadId=${event.payload.threadId} turnId=${resolvedState.turnId}\n`
+        );
+      } catch {}
+      this.scheduleTurnTimeout({
+        bindingKey: linked.bindingKey,
+        workspaceRoot: linked.workspaceRoot,
+        threadId: event.payload.threadId,
+        turnId: resolvedState.turnId,
+      });
+    }
   }
 
   async stopTypingForThread(threadId) {
