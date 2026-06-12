@@ -60,8 +60,14 @@ class ClaudeCodeIpcServer extends EventEmitter {
       });
     });
 
-    this.server.listen(this.socketPath, () => {
-      fs.chmodSync(this.socketPath, 0o600);
+    const listenPath = resolveListenPath(this.socketPath);
+    this.server.on("error", (err) => {
+      console.error(`[cyberboss] IPC server listen failed: ${err.message}`);
+    });
+    this.server.listen(listenPath, () => {
+      if (process.platform !== "win32") {
+        try { fs.chmodSync(this.socketPath, 0o600); } catch { /* ignore */ }
+      }
     });
   }
 
@@ -152,3 +158,11 @@ function validateIpcMessage(msg) {
 }
 
 module.exports = { ClaudeCodeIpcServer };
+
+function resolveListenPath(socketPath) {
+  if (process.platform === "win32") {
+    const name = path.basename(socketPath).replace(/\.sock$/i, "");
+    return `\\\\.\\pipe\\${name}`;
+  }
+  return socketPath;
+}

@@ -44,14 +44,17 @@ async function main() {
   // interact with the same ClaudeCode process that handles WeChat messages.
   const stateDir = process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
   const socketPath = path.join(stateDir, "claudecode-runtime.sock");
+  const connectPath = process.platform === "win32"
+    ? `\\\\.\\pipe\\${path.basename(socketPath).replace(/\.sock$/i, "")}`
+    : socketPath;
 
-  if (!fs.existsSync(socketPath)) {
+  if (process.platform !== "win32" && !fs.existsSync(socketPath)) {
     console.error(`Claude IPC socket not found: ${socketPath}`);
     console.error("Make sure the bridge is running with CYBERBOSS_RUNTIME=claudecode.");
     process.exit(1);
   }
 
-  const socket = net.createConnection(socketPath);
+  const socket = net.createConnection(connectPath);
   socket.setEncoding("utf8");
 
   let connected = false;
