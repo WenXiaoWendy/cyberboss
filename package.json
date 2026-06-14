@@ -13,6 +13,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "start": "node ./bin/cyberboss.js start",
     "start:checkin": "node ./bin/cyberboss.js start --checkin",
     "login": "node ./bin/cyberboss.js login",

@@ -1,0 +1,264 @@
+diff --git a/node_modules/timeline-for-agent/src/application/timeline/capture-screenshot.js b/node_modules/timeline-for-agent/src/application/timeline/capture-screenshot.js
+index 49164fc..59b203f 100644
+--- a/node_modules/timeline-for-agent/src/application/timeline/capture-screenshot.js
++++ b/node_modules/timeline-for-agent/src/application/timeline/capture-screenshot.js
+@@ -43,6 +43,18 @@ async function captureTimelineScreenshot(config, options = {}) {
+ 
+   await buildTimelineSite(config);
+ 
++  if (screenshotOptions.rangeValue) {
++    const dataPath = path.join(config.timelineSiteDir, "dashboard-data.json");
++    try {
++      const raw = fs.readFileSync(dataPath, "utf8");
++      const data = JSON.parse(raw);
++      if (data?.meta) {
++        data.meta.latestDate = screenshotOptions.rangeValue;
++        fs.writeFileSync(dataPath, JSON.stringify(data), "utf8");
++      }
++    } catch (_) {}
++  }
++
+   let server = null;
+   let serverInfo = null;
+   let browser = null;
+@@ -158,6 +170,7 @@ function resolveScreenshotRangeSelection(options = {}) {
+   const date = resolveSelectionText(options.date);
+   const week = resolveSelectionText(options.week);
+   const month = resolveSelectionText(options.month);
++  const explicitValue = resolveSelectionText(options.rangeValue);
+   const provided = [date ? "day" : "", week ? "week" : "", month ? "month" : ""].filter(Boolean);
+ 
+   if (provided.length > 1) {
+@@ -187,7 +200,7 @@ function resolveScreenshotRangeSelection(options = {}) {
+ 
+   return {
+     range,
+-    value: range === "day" ? date : range === "week" ? week : range === "month" ? month : "",
++    value: range === "day" ? (date || explicitValue) : range === "week" ? (week || explicitValue) : range === "month" ? (month || explicitValue) : "",
+   };
+ }
+ 
+@@ -465,9 +478,40 @@ async function selectRangeTab(page, range) {
+ async function selectRangeValue(page, requestedValue) {
+   const trigger = page.locator('.range-select-trigger[data-range-trigger="true"]').first();
+   await trigger.waitFor({ state: "visible", timeout: 15_000 });
++
++  // Skip if the correct value is already selected.
++  const currentText = (await trigger.textContent().catch(() => "")).trim();
++  if (normalizeLookupValue(currentText) === normalizeLookupValue(requestedValue)) {
++    return;
++  }
++
+   await trigger.click();
+   const optionSelector = ".range-select-option";
+   await page.locator(optionSelector).first().waitFor({ state: "visible", timeout: 15_000 });
++
++  // Press ArrowDown to check if more options appear
++  let optionCount = await page.locator(optionSelector).count();
++  console.error("[selectRangeValue] initial option count:", optionCount);
++  for (let i = 0; i < 5 && optionCount < 3; i++) {
++    await page.keyboard.press("ArrowDown");
++    await page.waitForTimeout(100);
++    const newCount = await page.locator(optionSelector).count();
++    if (newCount !== optionCount) {
++      console.error("[selectRangeValue] ArrowDown", i, ": count changed from", optionCount, "to", newCount);
++      optionCount = newCount;
++    }
++  }
++  console.error("[selectRangeValue] final option count:", optionCount);
++
++  // Re-check options after keyboard navigation
++  const debugOptions = await page.locator(optionSelector).evaluateAll((els) =>
++    els.map((el) => ({
++      value: String(el.getAttribute("data-range-option-value") || "").trim(),
++      highlighted: el.hasAttribute("data-highlighted"),
++    }))
++  );
++  console.error("[selectRangeValue] options after nav:", JSON.stringify(debugOptions));
++
+   const match = await findMatchingItem(page, optionSelector, requestedValue, {
+     idAttribute: "data-range-option-value",
+     labelAttribute: "data-range-option-label",
+@@ -475,7 +519,36 @@ async function selectRangeValue(page, requestedValue) {
+   if (!match) {
+     throw new Error(`Range option not found: ${requestedValue}`);
+   }
+-  await page.locator(`${optionSelector}[data-range-option-value="${match.id}"]`).first().click();
++
++  // Navigate to the target option via keyboard and press Enter.
++  // Radix Select.Item fires handleSelect() in its onKeyDown handler
++  // (Enter / Space) regardless of pointerTypeRef, so keyboard
++  // selection is immune to the pointerTypeRef race that can prevent
++  // mouse clicks from registering.
++  const indices = await page.locator(optionSelector).evaluateAll((elements, targetId) => {
++    let highlighted = -1;
++    let target = -1;
++    elements.forEach((el, i) => {
++      const val = String(el.getAttribute("data-range-option-value") || "").trim();
++      if (el.hasAttribute("data-highlighted")) highlighted = i;
++      if (val === targetId) target = i;
++    });
++    return { highlighted, target };
++  }, match.id);
++
++  if (indices.target < 0) {
++    throw new Error(`Range option not found: ${requestedValue}`);
++  }
++
++  const start = indices.highlighted >= 0 ? indices.highlighted : 0;
++  const delta = indices.target - start;
++  const key = delta > 0 ? "ArrowDown" : "ArrowUp";
++  for (let i = 0; i < Math.abs(delta); i += 1) {
++    await page.keyboard.press(key);
++    await page.waitForTimeout(30);
++  }
++  await page.keyboard.press("Enter");
++
+   await page.waitForFunction((expectedLabel) => {
+     const valueNode = document.querySelector('.range-select-trigger[data-range-trigger="true"]');
+     return !!valueNode && String(valueNode.textContent || "").includes(expectedLabel);
+@@ -571,6 +644,10 @@ function buildPageScreenshotStyles(sidePadding) {
+     `  padding-top: ${horizontalPadding} !important;`,
+     `  padding-bottom: ${horizontalPadding} !important;`,
+     "}",
++    ".event-block-meta { white-space: normal !important; overflow: visible !important; text-overflow: unset !important; }",
++    ".event-block-title { -webkit-line-clamp: 4 !important; }",
++    ".event-block-note { -webkit-line-clamp: 4 !important; }",
++    ".timeline-tooltip-meta { flex-wrap: wrap !important; overflow: visible !important; }",
+   ].join("\n");
+ }
+ 
+diff --git a/node_modules/timeline-for-agent/src/infra/timeline/timeline-store.js b/node_modules/timeline-for-agent/src/infra/timeline/timeline-store.js
+index f18aa08..a140e67 100644
+--- a/node_modules/timeline-for-agent/src/infra/timeline/timeline-store.js
++++ b/node_modules/timeline-for-agent/src/infra/timeline/timeline-store.js
+@@ -174,7 +174,21 @@ class TimelineStore {
+     const normalizedIncomingEvents = normalizeDayEvents(events, this.state.taxonomy, { strict: true });
+     validateDayEvents(normalizedDate, normalizedIncomingEvents, this.state.timezone);
+     for (const event of normalizedIncomingEvents) {
+-      mergedEvents.set(event.id, event);
++      const dup = findOverlappingEvent(mergedEvents, event);
++      if (dup) {
++        dup.startAt = event.startAt < dup.startAt ? event.startAt : dup.startAt;
++        dup.endAt = event.endAt > dup.endAt ? event.endAt : dup.endAt;
++        if (event.title && event.title.length >= dup.title.length) {
++          dup.title = event.title;
++        }
++        if (event.note) dup.note = event.note;
++        if (event.eventNodeId) dup.eventNodeId = event.eventNodeId;
++        const tags = new Set(dup.tags);
++        event.tags.forEach(t => tags.add(t));
++        dup.tags = [...tags];
++      } else {
++        mergedEvents.set(event.id, event);
++      }
+     }
+ 
+     for (const eventId of Array.isArray(dropEventIds) ? dropEventIds : []) {
+@@ -559,6 +573,31 @@ function slugify(value) {
+     .slice(0, 80) || "event";
+ }
+ 
++function findOverlappingEvent(existingMap, incoming) {
++  const inStart = Date.parse(incoming.startAt);
++  const inEnd = Date.parse(incoming.endAt);
++  for (const existing of existingMap.values()) {
++    const exStart = Date.parse(existing.startAt);
++    const exEnd = Date.parse(existing.endAt);
++    const overlapStart = Math.max(inStart, exStart);
++    const overlapEnd = Math.min(inEnd, exEnd);
++    const overlapMs = overlapEnd - overlapStart;
++    if (overlapMs <= 0) continue;
++    const shorterMs = Math.min(inEnd - inStart, exEnd - exStart);
++    if (overlapMs >= shorterMs * 0.5) {
++      if (incoming.subcategoryId === existing.subcategoryId) return existing;
++      if (incoming.title && existing.title && similarTitle(incoming.title, existing.title)) return existing;
++    }
++  }
++  return null;
++}
++
++function similarTitle(a, b) {
++  const na = a.replace(/\+/g, '').replace(/\//g, '').trim();
++  const nb = b.replace(/\+/g, '').replace(/\//g, '').trim();
++  return na === nb || na.includes(nb) || nb.includes(na);
++}
++
+ module.exports = {
+   TimelineStore,
+ };
+diff --git a/node_modules/timeline-for-agent/src/timeline/css/dashboard.css b/node_modules/timeline-for-agent/src/timeline/css/dashboard.css
+index bde9cc1..e9a808e 100644
+--- a/node_modules/timeline-for-agent/src/timeline/css/dashboard.css
++++ b/node_modules/timeline-for-agent/src/timeline/css/dashboard.css
+@@ -468,10 +468,9 @@ input {
+ 
+ .timeline-tooltip-meta {
+   display: flex;
+-  flex-wrap: nowrap;
++  flex-wrap: wrap;
+   gap: 10px;
+   align-items: center;
+-  overflow: hidden;
+ }
+ 
+ .timeline-tooltip-meta span {
+@@ -629,9 +628,8 @@ input {
+   font-size: 11px;
+   line-height: var(--leading-snug);
+   font-weight: 500;
+-  white-space: nowrap;
+-  overflow: hidden;
+-  text-overflow: ellipsis;
++  white-space: normal;
++  word-break: break-word;
+ }
+ 
+ .event-block-title-row {
+@@ -648,7 +646,7 @@ input {
+   line-height: 1.45;
+   color: var(--text);
+   display: -webkit-box;
+-  -webkit-line-clamp: 2;
++  -webkit-line-clamp: 3;
+   -webkit-box-orient: vertical;
+   overflow: hidden;
+   font-weight: 600;
+@@ -670,10 +668,8 @@ input {
+   font-size: 11px;
+   line-height: 1.4;
+   color: rgba(49, 64, 90, 0.7);
+-  display: -webkit-box;
+-  -webkit-line-clamp: 2;
+-  -webkit-box-orient: vertical;
+-  overflow: hidden;
++  white-space: pre-wrap;
++  word-break: break-word;
+   margin-top: 2px;
+ }
+ 
+@@ -802,12 +798,13 @@ input {
+   border-width: 0;
+   border-radius: 10px;
+   color: var(--item-text) !important;
+-  padding: 2px 5px;
++  padding: 4px 8px;
+   font-family: var(--font-sans);
+   font-size: 12px;
+-  line-height: 1.25;
++  line-height: 1.35;
+   font-weight: 500;
+   box-shadow: none;
++  height: auto !important;
+ }
+ 
+ .timeline-canvas .vis-item.cat-life,
+@@ -865,6 +862,8 @@ input {
+ .timeline-canvas .vis-item .vis-item-overflow {
+   color: var(--item-text) !important;
+   padding: 0;
++  white-space: normal;
++  word-break: break-word;
+ }
+ 
+ .trend-bar-label {
