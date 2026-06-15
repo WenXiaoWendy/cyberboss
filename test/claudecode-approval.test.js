@@ -131,13 +131,17 @@ test("claudecode approval events capture Write file paths for state-dir auto app
 
 test("claudecode adapter exposes image file read capability only for known image-capable models", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-vision-"));
+  const claudeConfigDir = path.join(tempDir, "claude");
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
   const adapter = createClaudeCodeRuntimeAdapter({
     stateDir: tempDir,
     sessionsFile: path.join(tempDir, "sessions.json"),
+    claudeConfigDir,
   });
   const configured = createClaudeCodeRuntimeAdapter({
     stateDir: tempDir,
     sessionsFile: path.join(tempDir, "configured-sessions.json"),
+    claudeConfigDir,
     claudeModel: "sonnet",
   });
 
@@ -159,7 +163,7 @@ test("claudecode adapter exposes image file read capability only for known image
   });
 });
 
-test("claudecode adapter hydrates model from Claude project transcript", async () => {
+test("claudecode adapter does not hydrate model from Claude project transcript response model", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-project-model-"));
   const stateDir = path.join(tempDir, "state");
   const claudeConfigDir = path.join(tempDir, "claude");
@@ -184,17 +188,136 @@ test("claudecode adapter hydrates model from Claude project transcript", async (
   });
 
   assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
-    model: "claude-sonnet-4-6",
+    model: "",
     modelProvider: "",
   });
 });
 
-test("claudecode adapter remembers model observed in stream messages", async () => {
+test("claudecode adapter prefers Claude env model over transcript response model", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-env-model-"));
+  const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
+  const workspaceRoot = path.join(tempDir, "workspace root");
+  const sessionId = "77777777-7777-4777-8777-777777777778";
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_MODEL: "gemini",
+    },
+  }));
+  const projectDir = path.join(claudeConfigDir, "projects", workspaceRoot.replace(/[\\/:\s]+/g, "-"));
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+    JSON.stringify({ type: "assistant", message: { model: "model" } }),
+    JSON.stringify({ type: "assistant", message: { model: "gemini-3-flash-a" } }),
+  ].join("\n"));
+  const sessionsFile = path.join(tempDir, "sessions.json");
+  new SessionStore({ filePath: sessionsFile, runtimeId: "claudecode" })
+    .setThreadIdForWorkspace("binding-1", workspaceRoot, sessionId);
+
+  const adapter = createClaudeCodeRuntimeAdapter({
+    stateDir,
+    sessionsFile,
+    claudeConfigDir,
+  });
+
+  assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
+    model: "gemini",
+    modelProvider: "",
+  });
+});
+
+test("claudecode adapter resolves Claude settings model aliases through default model env", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-alias-model-"));
+  const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
+  const workspaceRoot = path.join(tempDir, "workspace root");
+  const sessionId = "77777777-7777-4777-8777-777777777779";
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-opus-4-8[1M]",
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8[1M]",
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: "claude-opus-4-8",
+    },
+    model: "sonnet",
+  }));
+  const projectDir = path.join(claudeConfigDir, "projects", workspaceRoot.replace(/[\\/:\s]+/g, "-"));
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+    JSON.stringify({ type: "assistant", message: { model: "model" } }),
+  ].join("\n"));
+  const sessionsFile = path.join(tempDir, "sessions.json");
+  new SessionStore({ filePath: sessionsFile, runtimeId: "claudecode" })
+    .setThreadIdForWorkspace("binding-1", workspaceRoot, sessionId);
+
+  const adapter = createClaudeCodeRuntimeAdapter({
+    stateDir,
+    sessionsFile,
+    claudeConfigDir,
+  });
+
+  assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
+    model: "claude-opus-4-8[1M]",
+    modelProvider: "",
+  });
+});
+
+test("claudecode adapter does not infer a model from unselected Claude default aliases", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-unselected-defaults-"));
+  const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
+  const workspaceRoot = path.join(tempDir, "workspace root");
+  const sessionId = "77777777-7777-4777-8777-777777777780";
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-opus-4-8[1M]",
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8[1M]",
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: "claude-opus-4-8",
+    },
+  }));
+  const projectDir = path.join(claudeConfigDir, "projects", workspaceRoot.replace(/[\\/:\s]+/g, "-"));
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+    JSON.stringify({ type: "assistant", message: { model: "model" } }),
+  ].join("\n"));
+  const sessionsFile = path.join(tempDir, "sessions.json");
+  new SessionStore({ filePath: sessionsFile, runtimeId: "claudecode" })
+    .setThreadIdForWorkspace("binding-1", workspaceRoot, sessionId);
+
+  const adapter = createClaudeCodeRuntimeAdapter({
+    stateDir,
+    sessionsFile,
+    claudeConfigDir,
+  });
+
+  assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
+    model: "",
+    modelProvider: "",
+  });
+});
+
+test("claudecode adapter does not remember model observed in stream messages", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-stream-model-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
   const commandFile = path.join(tempDir, "fake-claude.js");
   const sessionId = "88888888-8888-4888-8888-888888888888";
   fs.writeFileSync(commandFile, [
@@ -211,6 +334,7 @@ test("claudecode adapter remembers model observed in stream messages", async () 
   const adapter = createClaudeCodeRuntimeAdapter({
     stateDir,
     sessionsFile: path.join(tempDir, "sessions.json"),
+    claudeConfigDir,
     claudeCommand: commandFile,
     claudeDisableVerbose: true,
   });
@@ -221,10 +345,129 @@ test("claudecode adapter remembers model observed in stream messages", async () 
       workspaceRoot,
       text: "hello",
     });
-    const sessionsText = await waitForFileText(path.join(tempDir, "sessions.json"), /claude-sonnet-4-6/);
-    assert.match(sessionsText, /claude-sonnet-4-6/);
     assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
-      model: "claude-sonnet-4-6",
+      model: "",
+      modelProvider: "",
+    });
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("claudecode adapter keeps Claude env model when stream reports provider response model", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-stream-env-model-"));
+  const workspaceRoot = path.join(tempDir, "workspace");
+  const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_MODEL: "gemini",
+    },
+  }));
+  const commandFile = path.join(tempDir, "fake-claude.js");
+  const sessionId = "88888888-8888-4888-8888-888888888889";
+  fs.writeFileSync(commandFile, [
+    "#!/usr/bin/env node",
+    "process.stdin.on(\"data\", () => {",
+    `  console.log(JSON.stringify({ type: "system", session_id: ${JSON.stringify(sessionId)} }));`,
+    "  console.log(JSON.stringify({ type: \"assistant\", message: { model: \"gemini-3-flash-a\", content: [{ type: \"text\", text: \"done\" }] } }));",
+    `  console.log(JSON.stringify({ type: "result", session_id: ${JSON.stringify(sessionId)}, result: "done" }));`,
+    "  process.exit(0);",
+    "});",
+  ].join("\n"));
+  fs.chmodSync(commandFile, 0o755);
+
+  const adapter = createClaudeCodeRuntimeAdapter({
+    stateDir,
+    sessionsFile: path.join(tempDir, "sessions.json"),
+    claudeConfigDir,
+    claudeCommand: commandFile,
+    claudeDisableVerbose: true,
+  });
+
+  try {
+    await adapter.sendTurn({
+      bindingKey: "binding-1",
+      workspaceRoot,
+      text: "hello",
+    });
+    assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
+      model: "gemini",
+      modelProvider: "",
+    });
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("claudecode adapter follows Claude settings model changes between turns", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-claude-dynamic-model-"));
+  const workspaceRoot = path.join(tempDir, "workspace");
+  const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
+  fs.mkdirSync(workspaceRoot, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_MODEL: "gemini",
+    },
+  }));
+  const argsFile = path.join(tempDir, "args.jsonl");
+  const commandFile = path.join(tempDir, "fake-claude.js");
+  fs.writeFileSync(commandFile, [
+    "#!/usr/bin/env node",
+    `const fs = require("node:fs");`,
+    `fs.appendFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
+    "process.stdin.on(\"data\", () => {",
+    "  const suffix = process.argv.includes(\"claude-opus-4-8[1M]\") ? \"2222\" : \"1111\";",
+    "  const sessionId = `99999999-9999-4999-8999-99999999${suffix}`;",
+    "  console.log(JSON.stringify({ type: \"system\", session_id: sessionId }));",
+    "  console.log(JSON.stringify({ type: \"result\", session_id: sessionId, result: \"done\" }));",
+    "  process.exit(0);",
+    "});",
+  ].join("\n"));
+  fs.chmodSync(commandFile, 0o755);
+
+  const adapter = createClaudeCodeRuntimeAdapter({
+    stateDir,
+    sessionsFile: path.join(tempDir, "sessions.json"),
+    claudeConfigDir,
+    claudeCommand: commandFile,
+    claudeDisableVerbose: true,
+  });
+
+  try {
+    await adapter.sendTurn({
+      bindingKey: "binding-1",
+      workspaceRoot,
+      text: "first",
+    });
+    fs.writeFileSync(path.join(claudeConfigDir, "settings.json"), JSON.stringify({
+      env: {
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-opus-4-8[1M]",
+      },
+      model: "sonnet",
+    }));
+    await adapter.sendTurn({
+      bindingKey: "binding-1",
+      workspaceRoot,
+      text: "second",
+    });
+
+    const launches = (await waitForFileText(argsFile, /claude-opus-4-8\[1M\]/))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(launches.map((args) => args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)), [
+      ["--model", "gemini"],
+      ["--model", "claude-opus-4-8[1M]"],
+    ]);
+    assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
+      model: "claude-opus-4-8[1M]",
       modelProvider: "",
     });
   } finally {
@@ -260,8 +503,10 @@ test("claudecode adapter dispatches turns only after a real session id is availa
   const tempDir = fs.mkdtempSync(path.join("/tmp", "cb-claude-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
   const captureFile = path.join(tempDir, "stdin.log");
   const commandFile = path.join(tempDir, "fake-claude.js");
   const sessionId = "11111111-1111-4111-8111-111111111111";
@@ -279,6 +524,7 @@ test("claudecode adapter dispatches turns only after a real session id is availa
   const adapter = createClaudeCodeRuntimeAdapter({
     stateDir,
     sessionsFile: path.join(tempDir, "sessions.json"),
+    claudeConfigDir,
     claudeCommand: commandFile,
     claudePermissionMode: "default",
     claudeDisableVerbose: true,
@@ -300,7 +546,7 @@ test("claudecode adapter dispatches turns only after a real session id is availa
     assert.match(turn.turnId, /^turn-\d+$/);
     assert.equal(adapter.getSessionStore().getThreadIdForWorkspace("binding-1", workspaceRoot), sessionId);
     assert.deepEqual(adapter.getSessionStore().getRuntimeParamsForWorkspace("binding-1", workspaceRoot), {
-      model: "claude-sonnet",
+      model: "",
       modelProvider: "",
     });
     assert.doesNotMatch(turn.threadId, /^pending-/);
@@ -388,8 +634,10 @@ test("claudecode adapter does not pass a codex-selected model to Claude Code", a
   const tempDir = fs.mkdtempSync(path.join("/tmp", "cb-claude-model-"));
   const workspaceRoot = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
+  const claudeConfigDir = path.join(tempDir, "claude");
   fs.mkdirSync(workspaceRoot, { recursive: true });
   fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(claudeConfigDir, { recursive: true });
   const sessionsFile = path.join(tempDir, "sessions.json");
   const argsFile = path.join(tempDir, "args.json");
   const commandFile = path.join(tempDir, "fake-claude.js");
@@ -413,6 +661,7 @@ test("claudecode adapter does not pass a codex-selected model to Claude Code", a
   const adapter = createClaudeCodeRuntimeAdapter({
     stateDir,
     sessionsFile,
+    claudeConfigDir,
     claudeCommand: commandFile,
     claudePermissionMode: "default",
     claudeDisableVerbose: true,
