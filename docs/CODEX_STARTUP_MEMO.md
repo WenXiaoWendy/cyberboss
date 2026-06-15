@@ -13,6 +13,11 @@ When the user says "继续 memory-v2 工作", "继续 CyberBoss 工作", or simp
   dry-run have been delivered.
 - The completed work did not modify the production database, L0, the main chat
   path, or PM2, and did not perform a schema migration.
+- The maintenance toolkit has been deployed to `/root/cyberboss-main`.
+- The first production read-only report passed:
+  `/root/.cyberboss/inbox/memory-v2/maintenance-reports/memory-v2-maintenance-20260615T075234Z`.
+- Recall/heat migration and five recall samples passed on a verified backup
+  copy only. Read `docs/memory-v2-preproduction-validation-2026-06-15.md`.
 - Do not repeat the old full-library audit unless the user explicitly requests
   a new audit with a new scope.
 
@@ -30,6 +35,7 @@ Additional detailed references:
 - `docs/memory-v2-recall-heat-design.md`
 - `docs/memory-v2-night-maintenance-dry-run.md`
 - `docs/memory-v2-claude-throttled-rollout.md`
+- `docs/memory-v2-preproduction-validation-2026-06-15.md`
 
 The production VPS database remains authoritative. Local files are
 implementation and handoff artifacts until deliberately deployed.
@@ -127,7 +133,8 @@ a database write and requires confirmation.
 
 ## Current Stop Point
 
-Memory V2 is ready for a disposable-copy recall/heat migration rehearsal.
+Memory V2 has passed the disposable-copy recall/heat migration rehearsal and is
+at the production-write approval boundary.
 
 The following have not been approved or executed:
 
