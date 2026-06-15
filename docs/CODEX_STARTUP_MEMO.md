@@ -18,6 +18,12 @@ When the user says "继续 memory-v2 工作", "继续 CyberBoss 工作", or simp
   `/root/.cyberboss/inbox/memory-v2/maintenance-reports/memory-v2-maintenance-20260615T075234Z`.
 - Recall/heat migration and five recall samples passed on a verified backup
   copy only. Read `docs/memory-v2-preproduction-validation-2026-06-15.md`.
+- The minimal additive recall/heat schema migration has now completed on the
+  production database. Read
+  `docs/memory-v2-production-schema-migration-2026-06-15.md`.
+- Production has `last_recalled_at`, `recall_count`,
+  `memory_recall_audit`, and `idx_memory_recall_audit_memory_time`.
+- No recall writer or chat call-path integration is enabled.
 - Do not repeat the old full-library audit unless the user explicitly requests
   a new audit with a new scope.
 
@@ -36,6 +42,7 @@ Additional detailed references:
 - `docs/memory-v2-night-maintenance-dry-run.md`
 - `docs/memory-v2-claude-throttled-rollout.md`
 - `docs/memory-v2-preproduction-validation-2026-06-15.md`
+- `docs/memory-v2-production-schema-migration-2026-06-15.md`
 
 The production VPS database remains authoritative. Local files are
 implementation and handoff artifacts until deliberately deployed.
@@ -133,12 +140,11 @@ a database write and requires confirmation.
 
 ## Current Stop Point
 
-Memory V2 has passed the disposable-copy recall/heat migration rehearsal and is
-at the production-write approval boundary.
+Memory V2 production schema is recall/heat-ready. The current boundary is
+implementation and approval of the actual recall writer.
 
 The following have not been approved or executed:
 
-- production schema migration
 - production recall/heat writes
 - automatic night-maintenance writes
 - backup restore
