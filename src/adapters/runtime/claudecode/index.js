@@ -39,8 +39,11 @@ function createClaudeCodeRuntimeAdapter(config) {
     }
   });
 
-  function resolveModel(model = "") {
-    return configuredModel || normalizeText(model);
+  function resolveModel() {
+    return configuredModel || readClaudeEnvModel({
+      claudeConfigDir: config.claudeConfigDir,
+      env: process.env,
+    });
   }
 
   async function ensureClient(workspaceRoot, model = "") {
@@ -72,7 +75,7 @@ function createClaudeCodeRuntimeAdapter(config) {
       workspaceRoot,
     });
     client.onMessage((event, raw) => {
-      rememberObservedModelForWorkspace(workspaceRoot, extractClaudeMessageModel(raw));
+      rememberObservedModelForWorkspace(workspaceRoot);
       if (event.type === "session.id") {
         for (const binding of sessionStore.listBindings()) {
           if (binding.activeWorkspaceRoot === workspaceRoot) {
@@ -160,7 +163,7 @@ function createClaudeCodeRuntimeAdapter(config) {
         command: config.claudeCommand || "claude",
         sessionsFile: config.sessionsFile,
         ipcSocketPath,
-        model: configuredModel,
+        model: resolveModel(),
       };
     },
     onEvent(listener) {
@@ -178,7 +181,7 @@ function createClaudeCodeRuntimeAdapter(config) {
       return sessionStore;
     },
     getTurnCapabilities({ model = "" } = {}) {
-      const effectiveModel = resolveModel(model);
+      const effectiveModel = resolveModel() || normalizeText(model);
       return {
         nativeImageInput: false,
         toolImageRead: hasClaudeImageFileRead(effectiveModel),
@@ -309,7 +312,11 @@ function createClaudeCodeRuntimeAdapter(config) {
         returnedThreadId,
         metadata,
       );
-      rememberModelForBinding(bindingKey, workspaceRoot, pendingModelByWorkspaceRoot.get(normalizeText(workspaceRoot)));
+      rememberModelForBinding(
+        bindingKey,
+        workspaceRoot,
+        desiredModel || pendingModelByWorkspaceRoot.get(normalizeText(workspaceRoot)),
+      );
       return {
         threadId: returnedThreadId,
         turnId: client.pendingTurnId,
@@ -318,26 +325,23 @@ function createClaudeCodeRuntimeAdapter(config) {
   };
 
   function hydrateRuntimeModelsFromClaudeProjects() {
+    const desiredModel = resolveModel();
     for (const binding of sessionStore.listBindings()) {
       const workspaceRoots = new Set([
         normalizeText(binding.activeWorkspaceRoot),
         ...sessionStore.listWorkspaceRoots(binding.bindingKey),
       ].filter(Boolean));
       for (const workspaceRoot of workspaceRoots) {
-        const threadId = sessionStore.getThreadIdForWorkspace(binding.bindingKey, workspaceRoot);
-        const model = readLatestClaudeProjectModel({
-          claudeConfigDir: config.claudeConfigDir,
-          workspaceRoot,
-          threadId,
-        });
-        rememberModelForBinding(binding.bindingKey, workspaceRoot, model);
+        if (desiredModel) {
+          rememberModelForBinding(binding.bindingKey, workspaceRoot, desiredModel);
+        }
       }
     }
   }
 
-  function rememberObservedModelForWorkspace(workspaceRoot, model) {
+  function rememberObservedModelForWorkspace(workspaceRoot) {
     const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
-    const normalizedModel = normalizeClaudeRuntimeModel(model);
+    const normalizedModel = resolveModel();
     if (!normalizedWorkspaceRoot || !normalizedModel) {
       return;
     }
@@ -354,7 +358,7 @@ function createClaudeCodeRuntimeAdapter(config) {
   }
 
   function rememberModelForBinding(bindingKey, workspaceRoot, model) {
-    const normalizedModel = normalizeClaudeRuntimeModel(model);
+    const normalizedModel = normalizeText(model);
     if (!bindingKey || !normalizeText(workspaceRoot) || !normalizedModel) {
       return;
     }
@@ -389,60 +393,60 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function extractClaudeMessageModel(raw) {
-  return normalizeClaudeRuntimeModel(raw?.message?.model);
-}
-
-function normalizeClaudeRuntimeModel(model) {
-  const normalized = normalizeText(model);
-  if (!normalized || normalized === "<synthetic>") {
-    return "";
+function readClaudeEnvModel({ claudeConfigDir = "", env = {} } = {}) {
+  const envModel = normalizeText(env?.ANTHROPIC_MODEL);
+  if (envModel) {
+    return envModel;
   }
-  return normalized;
-}
-
-function readLatestClaudeProjectModel({ claudeConfigDir = "", workspaceRoot = "", threadId = "" } = {}) {
-  const transcriptPath = resolveClaudeProjectTranscriptPath({ claudeConfigDir, workspaceRoot, threadId });
-  if (!transcriptPath) {
-    return "";
-  }
-  let raw = "";
+  const baseDir = normalizeText(claudeConfigDir) || path.join(os.homedir(), ".claude");
+  const settingsPath = path.join(baseDir, "settings.json");
   try {
-    raw = fs.readFileSync(transcriptPath, "utf8");
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const settingsEnv = settings && typeof settings.env === "object" && settings.env
+      ? settings.env
+      : {};
+    const settingsEnvModel = normalizeText(settingsEnv.ANTHROPIC_MODEL);
+    if (settingsEnvModel) {
+      return settingsEnvModel;
+    }
+    return resolveClaudeSettingsModel(settings?.model, { ...env, ...settingsEnv });
   } catch {
     return "";
   }
-  const lines = raw.split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]?.trim();
-    if (!line) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(line);
-      const model = normalizeClaudeRuntimeModel(parsed?.message?.model);
-      if (model) {
-        return model;
-      }
-    } catch {
-      // ignore malformed transcript lines
-    }
+}
+
+function resolveClaudeSettingsModel(model, env = {}) {
+  const selectedModel = normalizeText(model);
+  if (!selectedModel) {
+    return "";
+  }
+  const alias = getClaudeModelAlias(selectedModel);
+  if (!alias) {
+    return selectedModel;
+  }
+  const defaultModel = readClaudeDefaultModelForAlias(alias, env);
+  return defaultModel || selectedModel;
+}
+
+function getClaudeModelAlias(model) {
+  const normalized = normalizeText(model).toLowerCase();
+  if (!normalized || normalized === "default") {
+    return "";
+  }
+  const base = normalized.replace(/\[.*$/, "");
+  if (base === "opusplan") {
+    return "opus";
+  }
+  if (base === "sonnet" || base === "opus" || base === "haiku" || base === "fable") {
+    return base;
   }
   return "";
 }
 
-function resolveClaudeProjectTranscriptPath({ claudeConfigDir = "", workspaceRoot = "", threadId = "" } = {}) {
-  const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
-  const normalizedThreadId = normalizeThreadId(threadId);
-  if (!normalizedWorkspaceRoot || !normalizedThreadId) {
-    return "";
-  }
-  const baseDir = normalizeText(claudeConfigDir) || path.join(os.homedir(), ".claude");
-  return path.join(baseDir, "projects", encodeClaudeProjectPath(normalizedWorkspaceRoot), `${normalizedThreadId}.jsonl`);
-}
-
-function encodeClaudeProjectPath(workspaceRoot) {
-  return normalizeText(workspaceRoot).replace(/[\\/:\s]+/g, "-");
+function readClaudeDefaultModelForAlias(alias, env) {
+  const upperAlias = alias.toUpperCase();
+  return normalizeText(env?.[`ANTHROPIC_DEFAULT_${upperAlias}_MODEL`])
+    || normalizeText(env?.[`ANTHROPIC_DEFAULT_${upperAlias}_MODEL_NAME`]);
 }
 
 function hasClaudeImageFileRead(model) {
