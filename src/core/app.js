@@ -42,6 +42,8 @@ const {
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 const { createProjectTooling } = require("../tools/create-project-tooling");
+const { MemoryV2Retrieval } = require("../memory-v2/retrieval");
+const { MemoryV2RecallWriter } = require("../memory-v2/recall-writer");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
 const SESSION_EXPIRED_ERRCODE = -14;
@@ -81,6 +83,11 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.memoryV2Retrieval = config.memoryV2RecallEnabled
+      ? new MemoryV2Retrieval({ dbPath: config.memoryV2DbPath })
+      : null;
+    this.memoryV2RecallWriter = null;
+    this.memoryV2RecallByRunKey = new Map();
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -459,6 +466,7 @@ class CyberbossApp {
         accountId: prepared.accountId,
         senderId: prepared.senderId,
       });
+      this.rememberMemoryV2RecallCandidates(turn, runtimeTurn.memoryV2RecallCandidates);
       this.turnGateStore.attachThread(pendingScopeKey, turn.threadId);
       const replyTarget = {
         userId: prepared.senderId,
@@ -501,14 +509,108 @@ class CyberbossApp {
       model,
     });
     return {
-      text: assembleRuntimeTurnText({
+      ...this.applyMemoryV2RecallContext(assembleRuntimeTurnText({
         prepared,
         config: this.config,
         visionContext,
-      }),
+      }), prepared),
       attachments: Array.isArray(visionContext.runtimeAttachments) ? visionContext.runtimeAttachments : [],
       visionContext,
     };
+  }
+
+  applyMemoryV2RecallContext(runtimeText, prepared) {
+    if (!this.config?.memoryV2RecallEnabled || !this.memoryV2Retrieval || prepared?.provider === "system") {
+      return { text: runtimeText, memoryV2RecallCandidates: [] };
+    }
+    try {
+      const result = this.memoryV2Retrieval.retrieve(prepared?.originalText || prepared?.text || "", {
+        limit: this.config.memoryV2RecallLimit,
+      });
+      const candidates = Array.isArray(result.entries) ? result.entries : [];
+      if (!result.prompt || !candidates.length) {
+        return { text: runtimeText, memoryV2RecallCandidates: [] };
+      }
+      return {
+        text: [
+          result.prompt,
+          "",
+          "CURRENT WECHAT INPUT",
+          runtimeText,
+        ].join("\n").trim(),
+        memoryV2RecallCandidates: candidates,
+      };
+    } catch (error) {
+      console.warn(`[cyberboss] memory-v2 recall retrieval skipped reason=${error.message}`);
+      return { text: runtimeText, memoryV2RecallCandidates: [] };
+    }
+  }
+
+  rememberMemoryV2RecallCandidates(turn, candidates) {
+    const threadId = normalizeCommandArgument(turn?.threadId);
+    if (!threadId) {
+      return;
+    }
+    const memoryIds = normalizeMemoryV2CandidateIds(candidates);
+    if (!memoryIds.length) {
+      return;
+    }
+    const turnId = normalizeCommandArgument(turn?.turnId) || "pending";
+    this.memoryV2RecallByRunKey.set(buildRunKey(threadId, turnId), memoryIds);
+  }
+
+  recordMemoryV2RecallTurn(payload = {}) {
+    const threadId = normalizeCommandArgument(payload.threadId);
+    const turnId = normalizeCommandArgument(payload.turnId) || "pending";
+    if (!threadId) {
+      return Promise.resolve({ skipped: true, reason: "no_thread" });
+    }
+    const runKey = buildRunKey(threadId, turnId);
+    const memoryIds = this.memoryV2RecallByRunKey.get(runKey) || [];
+    this.memoryV2RecallByRunKey.delete(runKey);
+    if (!this.config?.memoryV2RecallWriteEnabled) {
+      return Promise.resolve({ skipped: true, reason: "disabled" });
+    }
+    if (!memoryIds.length) {
+      return Promise.resolve({ skipped: true, reason: "no_candidates" });
+    }
+    return Promise.resolve().then(() => {
+      const writer = this.getMemoryV2RecallWriter();
+      for (const memoryId of memoryIds) {
+        writer.recall({
+          id: memoryId,
+          eventId: `${threadId}:${turnId}:${memoryId}`,
+          consumer: this.runtimeAdapter.describe().id || "runtime",
+          purpose: "response_context",
+          sourceTurnId: `${threadId}:${turnId}`,
+        });
+      }
+      return { skipped: false, count: memoryIds.length };
+    }).catch((error) => {
+      console.warn(
+        `[cyberboss] memory-v2 recall write skipped thread=${threadId} turn=${turnId} reason=${error.message}`
+      );
+      return { skipped: true, reason: error.message };
+    });
+  }
+
+  forgetMemoryV2RecallCandidates(payload = {}) {
+    const threadId = normalizeCommandArgument(payload.threadId);
+    const turnId = normalizeCommandArgument(payload.turnId) || "pending";
+    if (threadId) {
+      this.memoryV2RecallByRunKey.delete(buildRunKey(threadId, turnId));
+    }
+  }
+
+  getMemoryV2RecallWriter() {
+    if (!this.memoryV2RecallWriter) {
+      this.memoryV2RecallWriter = new MemoryV2RecallWriter({
+        dbPath: this.config.memoryV2DbPath,
+        writeEnabled: true,
+        backupGate: this.config.memoryV2RecallBackupGate,
+      });
+    }
+    return this.memoryV2RecallWriter;
   }
 
   async routePreparedInbound({ bindingKey, workspaceRoot, prepared }) {
@@ -1483,6 +1585,11 @@ class CyberbossApp {
       }
       const sessionStore = this.runtimeAdapter.getSessionStore();
       sessionStore.clearApprovalPrompt(event.payload.threadId);
+      if (event.type === "runtime.turn.completed") {
+        void this.recordMemoryV2RecallTurn(event.payload);
+      } else {
+        this.forgetMemoryV2RecallCandidates(event.payload);
+      }
       const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(event.payload.threadId);
       const scopeKey = linked?.bindingKey && linked?.workspaceRoot
         ? buildScopeKey(linked.bindingKey, linked.workspaceRoot)
@@ -1954,6 +2061,13 @@ function isPathWithinAllowedDirectories(rawPath) {
 
 function normalizeCommandArgument(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeMemoryV2CandidateIds(candidates) {
+  const values = Array.isArray(candidates) ? candidates : [];
+  return [...new Set(values
+    .map((entry) => normalizeCommandArgument(entry?.id || entry))
+    .filter(Boolean))];
 }
 
 function normalizeThreadId(value) {
