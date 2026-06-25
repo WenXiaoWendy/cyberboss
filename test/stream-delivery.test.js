@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const { StreamDelivery } = require("../src/core/stream-delivery");
 
-const DEFERRED_REPLY_NOTICE = "由于微信 context_token 的限制，上轮对话里有一部分内容当时没能送达；这次用户再次发来消息、context_token 刷新后，先把遗留内容补上。如果这种情况反复出现，可发送 /chunk <数字>（例如 /chunk 50）调大最小合并字符数，减少消息分片。";
+const DEFERRED_REPLY_NOTICE = "";
 const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
 const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
@@ -523,7 +523,7 @@ test("plain reply prepends deferred prefix to the next reply", async () => {
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     userId: "user-7",
-    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n这是新一轮自动回复`,
+    text: `${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n这是新一轮自动回复`,
     contextToken: "ctx-7",
     preserveBlock: true,
   });
@@ -559,7 +559,7 @@ test("plain reply with deferred prefix is sent as soon as the first item is fina
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     userId: "user-8",
-    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n第一段`,
+    text: `${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n第一段`,
     contextToken: "ctx-8",
     preserveBlock: true,
   });
