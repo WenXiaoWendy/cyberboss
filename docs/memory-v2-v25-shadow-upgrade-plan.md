@@ -1,6 +1,6 @@
 # Memory V2.5 Shadow Upgrade Plan
 
-Status: design only. No production code, DB, L0, PM2, env, or runtime changes are part of this document.
+Status: shadow roadmap and implementation status. This document records docs-only planning plus Phase 1/2/3 read-only dry-run results. No production DB, L0, PM2, env, cron, or runtime changes are made by this document.
 
 Date: 2026-06-30
 Target system: CyberBoss Memory V2 on VPS /root/cyberboss-main
@@ -97,6 +97,23 @@ V2 is stable, but it is mostly entry-centric. It lacks first-class shadow models
 - Recall safety surfaces that explicitly separate private evidence, safe summaries, and live prompt surfaces.
 - A consistent automation boundary document for which parts can be dry-run, proposed, reviewed, and applied.
 
+## 1.1 Current V2.5 Phase Status
+
+This section separates upstream merge state from production safety state. Phase 1/2/3 have been implemented and run as read-only feature-branch dry-runs, but they are not assumed to be merged into upstream `main`.
+
+| Phase | Status | Branch | Commit | Changed files | Tests | Production read-only dry-run | Report path | Safety |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Phase 0 | Docs-only shadow plan PR exists. | `wuava584-collab:docs/memory-v25-shadow-plan` | `55d47f99c5a661c87c0470c37e7713cdbb5072c7` | `docs/memory-v2-v25-shadow-upgrade-plan.md` | Markdown review only. | No. | N/A | Docs-only. |
+| Phase 1 M axis patrol | Implemented on feature branch; not assumed merged upstream. | `feature/memory-v25-patrol-readonly` | `1f5ac0d85d6b79c2dea231f89710df2dc50bbd29` | `docs/memory-v2-v25-shadow-upgrade-plan.md`; `scripts/memory-v2-patrol.js`; `test/memory-v2-patrol.test.js` | `node --check` passed; `node --test` 3/3 passed. | Completed. | `/root/.cyberboss/inbox/memory-v2/patrol-reports/memory-v2-patrol-20260630T084147Z/patrol.md`; `/root/.cyberboss/inbox/memory-v2/patrol-reports/memory-v2-patrol-20260630T084147Z/patrol.json` | DB/L0/live recall/PM2: 0 writes. |
+| Phase 2 Z axis fact evolution | Implemented on feature branch; not assumed merged upstream. | `feature/memory-v25-fact-evolution-dry-run` | `a16463a4584eb625e4be4dceb915d8438656bb0b` | `docs/memory-v2-v25-shadow-upgrade-plan.md`; `scripts/memory-v2-fact-evolution-dry-run.js`; `test/memory-v2-fact-evolution-dry-run.test.js` | `node --check` passed; `node --test` 6/6 passed. | Completed. | `/root/.cyberboss/inbox/memory-v2/fact-evolution-reports/memory-v2-fact-evolution-20260630T091413Z/fact-evolution.md`; `/root/.cyberboss/inbox/memory-v2/fact-evolution-reports/memory-v2-fact-evolution-20260630T091413Z/fact-evolution.json` | DB/L0/live recall/PM2: 0 writes; stale/conflict/superseded candidates all 0. |
+| Phase 3 Y axis relation candidates | Implemented on feature branch; not assumed merged upstream. | `feature/memory-v25-relation-candidates-dry-run` | `6220ef88d1cc26a64f0c6948b8c2102140100255` | `docs/memory-v2-v25-shadow-upgrade-plan.md`; `scripts/memory-v2-relation-candidates-dry-run.js`; `test/memory-v2-relation-candidates-dry-run.test.js` | `node --check` passed; `node --test` 7/7 passed. | Completed. | `/root/.cyberboss/inbox/memory-v2/relation-candidate-reports/memory-v2-relation-candidates-20260630T093703Z/relation-candidates.md`; `/root/.cyberboss/inbox/memory-v2/relation-candidate-reports/memory-v2-relation-candidates-20260630T093703Z/relation-candidates.json` | DB/L0/relation edge/audit/status/heat/live recall/PM2: 0 writes; relation candidates all 0. |
+| Phase 4 memory community / family | Docs-only roadmap PR exists; implementation not started. | `wuava584-collab:codex/memory-v25-phase4-roadmap` | `a0a3f3bda4b35c41c0ec37de1dcd79b1f4d9d89e` | `docs/memory-v2-v25-shadow-upgrade-plan.md` | Documentation review only. | No. | N/A | Docs-only; Phase 4.0 not implemented. |
+
+Important distinction:
+
+- Phase 1/2/3 script branches exist as completed read-only dry-run work, but upstream `main` may still describe them as proposed until the relevant PRs are merged or this status section is accepted.
+- Phase 4 is only a roadmap update. It does not implement calibration, family generation, fact units, or summary drafts.
+
 ## 2. LMC-5 Modules Worth Borrowing
 
 ### P0: Read-only, low risk
@@ -187,16 +204,22 @@ Stop conditions:
 
 Goal: generate a read-only patrol report over existing Memory V2 rows.
 
-Proposed files to add later:
+Implementation status:
 
-- scripts/memory-v2-v25-patrol-dry-run.js
-- test/memory-v2-v25-patrol-dry-run.test.js
-- docs/memory-v2-v25-patrol.md
+- Implemented on `feature/memory-v25-patrol-readonly`.
+- Commit: `1f5ac0d85d6b79c2dea231f89710df2dc50bbd29`.
+- Not assumed merged into upstream `main`.
+
+Changed files:
+
+- docs/memory-v2-v25-shadow-upgrade-plan.md
+- scripts/memory-v2-patrol.js
+- test/memory-v2-patrol.test.js
 
 Report output path:
 
-- /root/.cyberboss/inbox/memory-v2/v25-patrol-reports/<run-id>/summary.md
-- /root/.cyberboss/inbox/memory-v2/v25-patrol-reports/<run-id>/patrol.json
+- /root/.cyberboss/inbox/memory-v2/patrol-reports/memory-v2-patrol-20260630T084147Z/patrol.md
+- /root/.cyberboss/inbox/memory-v2/patrol-reports/memory-v2-patrol-20260630T084147Z/patrol.json
 
 DB writes:
 
@@ -217,9 +240,16 @@ Rollback:
 
 Tests:
 
-- Unit tests with temp SQLite fixtures.
-- Golden-output tests for stale, duplicate, low-evidence, high-risk, and high-heat memories.
-- Production smoke with read-only DB handle.
+- `node --check` passed.
+- `node --test` passed, 3/3.
+- Production read-only dry-run completed.
+
+Production safety result:
+
+- DB writes: 0.
+- L0 writes: 0.
+- Live recall impact: 0.
+- PM2 changes: 0.
 
 Stop conditions:
 
@@ -231,16 +261,22 @@ Stop conditions:
 
 Goal: detect possible fact evolution without changing existing memories.
 
-Proposed files to add later:
+Implementation status:
 
-- scripts/memory-v2-v25-fact-evolution-dry-run.js
-- test/memory-v2-v25-fact-evolution-dry-run.test.js
-- docs/memory-v2-v25-fact-evolution.md
+- Implemented on `feature/memory-v25-fact-evolution-dry-run`.
+- Commit: `a16463a4584eb625e4be4dceb915d8438656bb0b`.
+- Not assumed merged into upstream `main`.
+
+Changed files:
+
+- docs/memory-v2-v25-shadow-upgrade-plan.md
+- scripts/memory-v2-fact-evolution-dry-run.js
+- test/memory-v2-fact-evolution-dry-run.test.js
 
 Report output path:
 
-- /root/.cyberboss/inbox/memory-v2/v25-fact-evolution-reports/<run-id>/summary.md
-- /root/.cyberboss/inbox/memory-v2/v25-fact-evolution-reports/<run-id>/candidates.json
+- /root/.cyberboss/inbox/memory-v2/fact-evolution-reports/memory-v2-fact-evolution-20260630T091413Z/fact-evolution.md
+- /root/.cyberboss/inbox/memory-v2/fact-evolution-reports/memory-v2-fact-evolution-20260630T091413Z/fact-evolution.json
 
 DB writes:
 
@@ -260,8 +296,22 @@ Rollback:
 
 Tests:
 
-- Fixture pairs: newer preference replaces older preference, temporary state expires, contradiction false positive, stable identity should not be superseded.
-- Verify no writes by checking DB size and mtime before/after.
+- `node --check` passed.
+- `node --test` passed, 6/6.
+- Production read-only dry-run completed.
+
+Production result:
+
+- Stale candidates: 0.
+- Conflict candidates: 0.
+- Superseded candidates: 0.
+
+Production safety result:
+
+- DB writes: 0.
+- L0 writes: 0.
+- Live recall impact: 0.
+- PM2 changes: 0.
 
 Stop conditions:
 
@@ -273,11 +323,17 @@ Stop conditions:
 
 Goal: propose relation edges between memories without writing them.
 
-Proposed files to add later:
+Implementation status:
 
-- scripts/memory-v2-v25-relation-candidates-dry-run.js
-- test/memory-v2-v25-relation-candidates-dry-run.test.js
-- docs/memory-v2-v25-relations.md
+- Implemented on `feature/memory-v25-relation-candidates-dry-run`.
+- Commit: `6220ef88d1cc26a64f0c6948b8c2102140100255`.
+- Not assumed merged into upstream `main`.
+
+Changed files:
+
+- docs/memory-v2-v25-shadow-upgrade-plan.md
+- scripts/memory-v2-relation-candidates-dry-run.js
+- test/memory-v2-relation-candidates-dry-run.test.js
 
 Candidate relation types:
 
@@ -293,6 +349,11 @@ DB writes:
 
 - No.
 
+Report output path:
+
+- /root/.cyberboss/inbox/memory-v2/relation-candidate-reports/memory-v2-relation-candidates-20260630T093703Z/relation-candidates.md
+- /root/.cyberboss/inbox/memory-v2/relation-candidate-reports/memory-v2-relation-candidates-20260630T093703Z/relation-candidates.json
+
 L0 impact:
 
 - None.
@@ -307,8 +368,24 @@ Rollback:
 
 Tests:
 
-- Pairing tests for near-duplicates, relationship commitments, operational notes, transient moods, and system instructions.
-- Ensure no relation edge table is created in production.
+- `node --check` passed.
+- `node --test` passed, 7/7.
+- Production read-only dry-run completed.
+
+Production result:
+
+- Relation candidates: 0.
+
+Production safety result:
+
+- DB writes: 0.
+- L0 writes: 0.
+- Relation edge writes: 0.
+- Audit writes: 0.
+- Status writes: 0.
+- Heat writes: 0.
+- Live recall impact: 0.
+- PM2 changes: 0.
 
 Stop conditions:
 
@@ -593,16 +670,14 @@ Manual confirmation is required before:
 
 Do not do V3 now.
 
-Memory V2 is stable enough to keep as production. LMC-5 should be treated as a design reference, not a replacement. The right next step is V2.5 shadow: read-only patrol, fact-evolution candidates, relation candidates, and memory community dry-runs.
+Memory V2 is stable enough to keep as production. LMC-5 should be treated as a design reference, not a replacement. V2.5 shadow now has completed read-only dry-run records for Phase 1 patrol, Phase 2 fact evolution, and Phase 3 relation candidates, while Phase 4 remains roadmap-only.
 
 Phase 4 must begin with Phase 4.0 embedding similarity calibration. `0.70` is only a provisional threshold, not a fixed rule. Any embedding model change requires recalibration before candidate family generation. Emotional and play memories need separate similarity distribution statistics before clustering because their surface language is especially easy to over-merge.
 
-Recommended next PR:
+Recommended next PR after this status update, only if explicitly approved:
 
-- Only this document: docs/memory-v2-v25-shadow-upgrade-plan.md.
-
-Recommended first implementation after that, only if approved:
-
-- Phase 1 M-axis patrol dry-run report, read-only, runtime-disconnected, no DB writes.
+- Phase 4.0 embedding similarity calibration dry-run.
+- It must remain report-only.
+- It must not generate candidate families, fact units, summary drafts, DB writes, L0 writes, runtime changes, or live recall changes.
 
 The high-risk items that must wait for explicit approval are automatic supersession, relation edge writes, family confirmation, family summary writes, live recall reranking, and any production DB schema change.
