@@ -8,7 +8,7 @@ PROJECTS=(
   "D:/cyberboss-app:main"
 )
 
-AUTO_PUSH=false
+AUTO_PUSH=true
 if [ "$1" = "--push" ]; then
   AUTO_PUSH=true
 fi
@@ -16,7 +16,7 @@ fi
 echo "=== $(date '+%Y-%m-%d %H:%M') git push 检查 ==="
 
 for entry in "${PROJECTS[@]}"; do
-  dir="${entry%%:*}"
+  dir="${entry%:*}"
   branch="${entry##*:}"
   name=$(basename "$dir")
 

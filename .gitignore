@@ -9,3 +9,4 @@ third_party/
 firmware/
 .tmp/
 crash-ck.txt
+temp/

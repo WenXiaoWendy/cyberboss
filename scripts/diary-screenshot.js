@@ -29,7 +29,16 @@ async function main() {
       viewport: { width: 520, height: 800 },
       deviceScaleFactor: 2,
     });
-    await page.goto(url, { waitUntil: "networkidle" });
+    // Block external fonts that hang behind GFW
+    await page.route("**/*", (route) => {
+      const u = route.request().url();
+      if (u.includes("googleapis.com") || u.includes("gstatic.com") || u.includes("fonts.googleapis")) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    await page.goto(url, { waitUntil: "load", timeout: 15000 });
     await page.screenshot({ path: outputPath, type: "png", fullPage: true });
   } finally {
     await browser.close().catch(() => {});
