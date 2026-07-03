@@ -337,13 +337,12 @@ Changed files:
 
 Candidate relation types:
 
-- supports
-- refines
+- same_theme_candidate
+- refines_candidate
+- supports_candidate
 - contradicts_candidate
 - supersedes_candidate
-- same_theme
-- evidence_for
-- should_not_merge
+- should_not_merge_candidate
 
 DB writes:
 
