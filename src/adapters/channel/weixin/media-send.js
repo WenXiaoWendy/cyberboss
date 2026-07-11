@@ -4,6 +4,7 @@ const fs = require("fs/promises");
 
 const { getUploadUrl, sendMessage } = require("./api");
 const { getMimeFromFilename } = require("./media-mime");
+const { redactSensitiveText } = require("./redact");
 
 const WEIXIN_MEDIA_TYPE = {
   IMAGE: 1,
@@ -21,26 +22,130 @@ function aesEcbPaddedSize(plaintextSize) {
 }
 
 function buildCdnUploadUrl({ cdnBaseUrl, uploadParam, filekey }) {
-  return `${cdnBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
+  const normalizedBaseUrl = String(cdnBaseUrl || "").trim().replace(/\/+$/g, "");
+  if (!normalizedBaseUrl) {
+    return "";
+  }
+  return `${normalizedBaseUrl}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
 }
 
-async function uploadBufferToCdn({ buf, uploadParam, filekey, cdnBaseUrl, aeskey }) {
+function appendUploadQueryParams(url, { uploadParam, filekey }) {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has("encrypted_query_param")) {
+    parsed.searchParams.set("encrypted_query_param", uploadParam);
+  }
+  if (!parsed.searchParams.has("filekey")) {
+    parsed.searchParams.set("filekey", filekey);
+  }
+  return parsed.toString();
+}
+
+function normalizeUploadUrlCandidate(value, { uploadParam, filekey }) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text || !/^https?:\/\//i.test(text)) {
+    return "";
+  }
+  try {
+    return appendUploadQueryParams(text, { uploadParam, filekey });
+  } catch {
+    return "";
+  }
+}
+
+function collectUploadUrlCandidates(uploadUrlResp, { cdnBaseUrl, uploadParam, filekey }) {
+  const candidates = [];
+  const push = (value) => {
+    if (typeof value !== "string" || !value.trim()) {
+      return;
+    }
+    candidates.push(value.trim());
+  };
+
+  for (const candidate of collectUploadUrlFields(uploadUrlResp)) {
+    push(candidate);
+  }
+
+  for (const baseUrl of String(cdnBaseUrl || "").split(",")) {
+    push(buildCdnUploadUrl({ cdnBaseUrl: baseUrl, uploadParam, filekey }));
+  }
+
+  return Array.from(new Set(candidates
+    .map((candidate) => normalizeUploadUrlCandidate(candidate, { uploadParam, filekey }))
+    .filter(Boolean)));
+}
+
+function collectUploadUrlFields(value, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 3) {
+    return [];
+  }
+  const results = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string" && /(?:^|_)(?:upload_?)?url$/i.test(key)) {
+      results.push(item);
+      continue;
+    }
+    if (item && typeof item === "object") {
+      results.push(...collectUploadUrlFields(item, depth + 1));
+    }
+  }
+  return results;
+}
+
+function summarizeUploadUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "(invalid-url)";
+  }
+}
+
+function summarizeUploadResponseKeys(value, prefix = "", depth = 0) {
+  if (!value || typeof value !== "object" || depth > 2) {
+    return [];
+  }
+  const keys = [];
+  for (const [key, item] of Object.entries(value)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    keys.push(fullKey);
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      keys.push(...summarizeUploadResponseKeys(item, fullKey, depth + 1));
+    }
+  }
+  return keys;
+}
+
+async function uploadBufferToCdn({ buf, uploadUrls, aeskey }) {
   const ciphertext = encryptAesEcb(buf, aeskey);
-  const cdnUrl = buildCdnUploadUrl({ cdnBaseUrl, uploadParam, filekey });
-  const response = await fetch(cdnUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: new Uint8Array(ciphertext),
-  });
-  if (response.status !== 200) {
-    const errMsg = response.headers.get("x-error-message") || await response.text();
-    throw new Error(`CDN upload failed: ${errMsg || response.status}`);
+  const urls = Array.isArray(uploadUrls) ? uploadUrls.filter(Boolean) : [];
+  if (!urls.length) {
+    throw new Error("No CDN upload URL candidates available");
   }
-  const downloadParam = response.headers.get("x-encrypted-param") || "";
-  if (!downloadParam) {
-    throw new Error("CDN upload response missing x-encrypted-param header");
+
+  const errors = [];
+  for (const cdnUrl of urls) {
+    try {
+      const response = await fetch(cdnUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(ciphertext),
+      });
+      if (response.status !== 200) {
+        const errMsg = response.headers.get("x-error-message") || await response.text();
+        throw new Error(`http ${response.status}: ${redactSensitiveText(errMsg || "")}`);
+      }
+      const downloadParam = response.headers.get("x-encrypted-param") || "";
+      if (!downloadParam) {
+        throw new Error("missing x-encrypted-param header");
+      }
+      return { downloadParam };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${summarizeUploadUrl(cdnUrl)} => ${redactSensitiveText(message)}`);
+    }
   }
-  return { downloadParam };
+
+  throw new Error(`CDN upload failed after ${urls.length} candidate(s): ${errors.join("; ")}`);
 }
 
 async function uploadMediaToWeixin({ filePath, toUserId, opts, cdnBaseUrl, mediaType }) {
@@ -68,11 +173,18 @@ async function uploadMediaToWeixin({ filePath, toUserId, opts, cdnBaseUrl, media
     throw new Error("getUploadUrl returned no upload_param");
   }
 
-  const { downloadParam } = await uploadBufferToCdn({
-    buf: plaintext,
+  const uploadUrls = collectUploadUrlCandidates(uploadUrlResp, {
+    cdnBaseUrl,
     uploadParam,
     filekey,
-    cdnBaseUrl,
+  });
+  console.log(
+    `[cyberboss] weixin upload candidates=${uploadUrls.map(summarizeUploadUrl).join(",") || "(none)"} responseKeys=${summarizeUploadResponseKeys(uploadUrlResp).join(",") || "(none)"}`
+  );
+
+  const { downloadParam } = await uploadBufferToCdn({
+    buf: plaintext,
+    uploadUrls,
     aeskey,
   });
 
@@ -192,4 +304,9 @@ async function sendWeixinMediaFile({ filePath, to, contextToken, baseUrl, token,
   return { kind: "file", fileName: path.basename(filePath) };
 }
 
-module.exports = { sendWeixinMediaFile };
+module.exports = {
+  sendWeixinMediaFile,
+  buildCdnUploadUrl,
+  collectUploadUrlCandidates,
+  collectUploadUrlFields,
+};
