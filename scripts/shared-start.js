@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const path = require("path");
 const {
   rootDir,
   listenUrl,
@@ -11,8 +12,13 @@ const {
 } = require("./shared-common");
 const { assertSafeBetaStartAllowed, buildSafeCodexEnv } = require("../src/core/safe-beta");
 
-function buildSharedStartArgs({ safeBeta: enabled = false } = {}) {
-  return ["./bin/cyberboss.js", "start", ...(enabled ? [] : ["--checkin"])];
+function buildSharedStartArgs({ safeBeta: enabled = false, preflightOnly = false } = {}) {
+  return [
+    "./bin/cyberboss.js",
+    "start",
+    ...(enabled ? [] : ["--checkin"]),
+    ...(preflightOnly ? ["--state-dir-preflight-only"] : []),
+  ];
 }
 
 async function main() {
@@ -21,6 +27,10 @@ async function main() {
     mode: "shared:start",
     allowedUserIds: String(process.env.CYBERBOSS_ALLOWED_USER_IDS || "").split(","),
   });
+  if (process.argv.includes("--state-dir-preflight-only")) {
+    await runStateDirPreflightChild();
+    return;
+  }
   const runtime = process.env.CYBERBOSS_RUNTIME || "codex";
   console.log(`starting shared bridge runtime=${runtime}`);
   const appServer = await ensureSharedAppServer();
@@ -73,6 +83,33 @@ if (require.main === module) {
   main().catch((error) => {
     console.error(error.message || String(error));
     process.exit(1);
+  });
+}
+
+function runStateDirPreflightChild() {
+  return new Promise((resolve, reject) => {
+    const childEnv = safeBeta ? buildSafeCodexEnv(process.env) : { ...process.env };
+    const child = spawn(process.execPath, [
+      path.join(rootDir, "bin", "cyberboss.js"),
+      "start",
+      "--state-dir-preflight-only",
+    ], {
+      cwd: process.cwd(),
+      env: childEnv,
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error("Shared start state directory preflight was interrupted."));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error("Shared start state directory preflight failed."));
+        return;
+      }
+      resolve();
+    });
   });
 }
 

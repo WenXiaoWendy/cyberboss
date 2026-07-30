@@ -7,17 +7,55 @@ function loadCyberbossEnv({
   defaultStateDir = path.join(os.homedir(), ".cyberboss"),
   baseEnv = process.env,
 } = {}) {
+  return resolveCyberbossEnv({ cwd, defaultStateDir, baseEnv }).env;
+}
+
+function resolveCyberbossEnv({
+  cwd = process.cwd(),
+  defaultStateDir = path.join(os.homedir(), ".cyberboss"),
+  baseEnv = process.env,
+} = {}) {
   const inherited = { ...baseEnv };
   const cwdValues = readEnvFile(path.join(cwd, ".env"));
-  const configuredStateDir = normalizeText(inherited.CYBERBOSS_STATE_DIR)
-    || normalizeText(cwdValues.CYBERBOSS_STATE_DIR);
-  const customState = configuredStateDir && path.resolve(configuredStateDir) !== path.resolve(defaultStateDir);
-  const stateValues = readEnvFile(path.join(configuredStateDir || defaultStateDir, ".env"));
+  const inheritedStateDir = normalizeText(inherited.CYBERBOSS_STATE_DIR);
+  const cwdStateDir = normalizeText(cwdValues.CYBERBOSS_STATE_DIR);
+  if (inheritedStateDir && cwdStateDir
+    && resolveFrom(cwd, inheritedStateDir) !== resolveFrom(cwd, cwdStateDir)) {
+    throw new Error("Cyberboss state directory configuration conflicts between the process and workspace .env.");
+  }
+
+  const configuredStateDir = inheritedStateDir || cwdStateDir;
+  const resolvedDefaultStateDir = path.resolve(defaultStateDir);
+  const resolvedStateDir = configuredStateDir
+    ? resolveFrom(cwd, configuredStateDir)
+    : resolvedDefaultStateDir;
+  const customState = resolvedStateDir !== resolvedDefaultStateDir;
+  const stateEnvFile = path.join(resolvedStateDir, ".env");
+  const stateValues = readEnvFile(stateEnvFile);
 
   if (customState) {
-    return { ...cwdValues, ...stateValues, ...inherited, CYBERBOSS_STATE_DIR: configuredStateDir };
+    return {
+      env: {
+        ...cwdValues,
+        ...stateValues,
+        ...inherited,
+        CYBERBOSS_STATE_DIR: resolvedStateDir,
+      },
+      stateDir: resolvedStateDir,
+      defaultStateDir: resolvedDefaultStateDir,
+      customState,
+      stateEnvLoaded: fs.existsSync(stateEnvFile) && fs.statSync(stateEnvFile).isFile(),
+      inheritedStateDirSet: Boolean(inheritedStateDir),
+    };
   }
-  return { ...stateValues, ...cwdValues, ...inherited };
+  return {
+    env: { ...stateValues, ...cwdValues, ...inherited },
+    stateDir: resolvedStateDir,
+    defaultStateDir: resolvedDefaultStateDir,
+    customState,
+    stateEnvLoaded: fs.existsSync(stateEnvFile) && fs.statSync(stateEnvFile).isFile(),
+    inheritedStateDirSet: Boolean(inheritedStateDir),
+  };
 }
 
 function applyCyberbossEnv(options = {}) {
@@ -68,4 +106,12 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { applyCyberbossEnv, loadCyberbossEnv };
+function resolveFrom(cwd, value) {
+  return path.resolve(cwd, value);
+}
+
+module.exports = {
+  applyCyberbossEnv,
+  loadCyberbossEnv,
+  resolveCyberbossEnv,
+};

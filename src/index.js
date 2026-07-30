@@ -3,11 +3,13 @@ const path = require("path");
 
 const { readConfig } = require("./core/config");
 const { createWeixinChannelAdapter } = require("./adapters/channel/weixin");
-const { applyCyberbossEnv } = require("./core/env-loader");
+const { applyCyberbossEnv, resolveCyberbossEnv } = require("./core/env-loader");
 const {
   assertSafeBetaStartAllowed,
+  isSafeBetaEnabled,
   validateMemoryMcpPaths,
 } = require("./core/safe-beta");
+const { assertSafeBetaStateDir } = require("./core/state-dir-preflight");
 const { renderInstructionTemplate } = require("./core/instructions-template");
 const { CyberbossApp } = require("./core/app");
 const { runSystemCheckinPoller } = require("./app/system-checkin-poller");
@@ -83,12 +85,27 @@ function installRuntimeErrorHooks() {
 }
 
 async function main() {
+  const inheritedStateDir = process.env.CYBERBOSS_STATE_DIR;
+  const envResolution = resolveCyberbossEnv();
   loadEnv();
   ensureRuntimeEnv();
   installRuntimeErrorHooks();
   const argv = process.argv.slice(2);
   const config = readConfig();
   const command = config.mode || "help";
+  assertSafeBetaStateDir({
+    safeBeta: isSafeBetaEnabled(process.env.CYBERBOSS_SAFE_BETA),
+    mode: command,
+    stateDir: config.stateDir,
+    defaultStateDir: envResolution.defaultStateDir,
+    stateEnvLoaded: envResolution.stateEnvLoaded,
+    inheritedStateDir,
+    requireInherited: true,
+  });
+  if (argv.includes("--state-dir-preflight-only")) {
+    console.log("[cyberboss] state directory preflight passed.");
+    return;
+  }
   let app = null;
   const getApp = () => {
     if (!app) {
