@@ -1,9 +1,10 @@
 const { spawn } = require("child_process");
 const os = require("os");
-const WebSocket = require("ws");
 const { buildCodexMcpConfigArgs } = require("./mcp-config");
 
 const IS_WINDOWS = os.platform() === "win32";
+const WEBSOCKET_CONNECTING = 0;
+const WEBSOCKET_OPEN = 1;
 const DEFAULT_CODEX_COMMAND = "codex";
 const WINDOWS_EXECUTABLE_SUFFIX_RE = /\.(cmd|exe|bat)$/i;
 const CODEX_CLIENT_INFO = {
@@ -13,12 +14,20 @@ const CODEX_CLIENT_INFO = {
 };
 
 class CodexRpcClient {
-  constructor({ endpoint = "", env = process.env, codexCommand = "", extraWritableRoots = [], mcpServerConfig = null }) {
+  constructor({
+    endpoint = "",
+    env = process.env,
+    codexCommand = "",
+    extraWritableRoots = [],
+    mcpServerConfig = null,
+    safeBeta = false,
+  }) {
     this.endpoint = endpoint;
     this.env = env;
     this.codexCommand = codexCommand || resolveDefaultCodexCommand(env);
     this.extraWritableRoots = normalizeWritableRoots(extraWritableRoots);
     this.mcpServerConfig = mcpServerConfig;
+    this.safeBeta = safeBeta === true;
     this.mode = endpoint ? "websocket" : "spawn";
     this.socket = null;
     this.child = null;
@@ -30,10 +39,10 @@ class CodexRpcClient {
 
   async connect() {
     if (this.mode === "websocket") {
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      if (this.socket && this.socket.readyState === WEBSOCKET_OPEN) {
         return;
       }
-      if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+      if (this.socket && this.socket.readyState === WEBSOCKET_CONNECTING) {
         return await waitForSocketOpen(this.socket);
       }
       this.socket = null;
@@ -95,6 +104,7 @@ class CodexRpcClient {
   }
 
   async connectWebSocket() {
+    const WebSocket = require("ws");
     await new Promise((resolve, reject) => {
       const socket = new WebSocket(this.endpoint);
       this.socket = socket;
@@ -117,7 +127,7 @@ class CodexRpcClient {
 
   isTransportReady() {
     if (this.mode === "websocket") {
-      return !!this.socket && this.socket.readyState === WebSocket.OPEN;
+      return !!this.socket && this.socket.readyState === WEBSOCKET_OPEN;
     }
     return !!this.child && !this.child.killed;
   }
@@ -153,6 +163,7 @@ class CodexRpcClient {
         accessMode,
         workspaceRoot,
         extraWritableRoots: this.extraWritableRoots,
+        safeBeta: this.safeBeta,
       }))
       : this.sendRequest("thread/start", { input });
   }
@@ -253,7 +264,7 @@ class CodexRpcClient {
 
   sendRaw(payload) {
     if (this.mode === "websocket") {
-      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      if (!this.socket || this.socket.readyState !== WEBSOCKET_OPEN) {
         throw new Error("Codex websocket is not connected");
       }
       this.socket.send(payload);
@@ -381,14 +392,27 @@ function buildTurnInputPayload({ text, attachments = [] }) {
   return input;
 }
 
-function buildTurnStartParams({ threadId, input, model, modelProvider, effort, accessMode, workspaceRoot, extraWritableRoots = [] }) {
+function buildTurnStartParams({
+  threadId,
+  input,
+  model,
+  modelProvider,
+  effort,
+  accessMode,
+  workspaceRoot,
+  extraWritableRoots = [],
+  safeBeta = false,
+  safeExecutionPolicy = undefined,
+}) {
   const params = { threadId, input };
   const normalizedWorkspaceRoot = normalizeNonEmptyString(workspaceRoot);
   const normalizedModel = normalizeNonEmptyString(model);
   const normalizedModelProvider = normalizeNonEmptyString(modelProvider);
   const normalizedEffort = normalizeNonEmptyString(effort);
   const normalizedAccessMode = normalizeAccessMode(accessMode);
-  const executionPolicies = buildExecutionPolicies(normalizedAccessMode, workspaceRoot, extraWritableRoots);
+  const executionPolicies = safeBeta
+    ? buildSafeBetaExecutionPolicies(safeExecutionPolicy)
+    : buildExecutionPolicies(normalizedAccessMode, workspaceRoot, extraWritableRoots);
   if (normalizedWorkspaceRoot) {
     params.cwd = normalizedWorkspaceRoot;
   }
@@ -407,6 +431,21 @@ function buildTurnStartParams({ threadId, input, model, modelProvider, effort, a
   params.approvalPolicy = executionPolicies.approvalPolicy;
   params.sandboxPolicy = executionPolicies.sandboxPolicy;
   return params;
+}
+
+function buildSafeBetaExecutionPolicies(override) {
+  if (override !== undefined) {
+    const valid = override
+      && override.approvalPolicy === "on-request"
+      && override.sandboxPolicy?.type === "readOnly";
+    if (!valid) {
+      throw new Error("Safe Beta Codex policy is invalid.");
+    }
+  }
+  return {
+    approvalPolicy: "on-request",
+    sandboxPolicy: { type: "readOnly" },
+  };
 }
 
 function normalizeAccessMode(value) {
@@ -458,7 +497,7 @@ function waitForSocketOpen(socket) {
       reject(new Error("Codex websocket is not connected"));
       return;
     }
-    if (socket.readyState === WebSocket.OPEN) {
+    if (socket.readyState === WEBSOCKET_OPEN) {
       resolve();
       return;
     }
@@ -485,4 +524,4 @@ function waitForSocketOpen(socket) {
   });
 }
 
-module.exports = { CodexRpcClient };
+module.exports = { CodexRpcClient, buildTurnStartParams };

@@ -27,6 +27,19 @@ function createInboundFilter() {
       if (!senderId) {
         return null;
       }
+      if (config?.safeBeta) {
+        const allowedUserIds = new Set(
+          Array.isArray(config.allowedUserIds)
+            ? config.allowedUserIds.map(normalizeText).filter(Boolean)
+            : []
+        );
+        if (!allowedUserIds.has(senderId)) {
+          return null;
+        }
+        if (isNonDirectConversation(message)) {
+          return null;
+        }
+      }
 
       const createdAtMs = normalizeMessageTimestampMs(message);
 
@@ -40,8 +53,11 @@ function createInboundFilter() {
       }
 
       const itemList = Array.isArray(message.item_list) ? message.item_list : [];
+      if (config?.safeBeta && !isSafePlainTextItems(itemList)) {
+        return null;
+      }
       const text = bodyFromItemList(itemList);
-      const attachments = extractAttachmentItems(itemList);
+      const attachments = config?.safeBeta ? [] : extractAttachmentItems(itemList);
       if (!text && !attachments.length) {
         return null;
       }
@@ -61,6 +77,35 @@ function createInboundFilter() {
       };
     },
   };
+}
+
+function isSafePlainTextItems(items) {
+  if (!Array.isArray(items) || items.length !== 1) {
+    return false;
+  }
+  const item = items[0];
+  if (Number(item?.type) !== MESSAGE_ITEM_TEXT) {
+    return false;
+  }
+  if (item?.ref_msg?.message_item && Number(item.ref_msg.message_item.type) !== MESSAGE_ITEM_TEXT) {
+    return false;
+  }
+  return Boolean(normalizeText(item?.text_item?.text));
+}
+
+function isNonDirectConversation(message) {
+  if (message?.is_group === true || message?.is_public_account === true) {
+    return true;
+  }
+  if (normalizeText(message?.group_id) || normalizeText(message?.chatroom_id)) {
+    return true;
+  }
+  const chatType = normalizeText(message?.chat_type).toLowerCase();
+  if (chatType && !["1", "single", "direct", "private"].includes(chatType)) {
+    return true;
+  }
+  const conversationType = Number(message?.conversation_type);
+  return Number.isFinite(conversationType) && conversationType > 1;
 }
 
 function bodyFromItemList(items) {

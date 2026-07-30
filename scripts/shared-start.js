@@ -7,9 +7,20 @@ const {
   removePidFileIfMatches,
   ensureSharedAppServer,
   ensureBridgeNotRunning,
+  safeBeta,
 } = require("./shared-common");
+const { assertSafeBetaStartAllowed, buildSafeCodexEnv } = require("../src/core/safe-beta");
+
+function buildSharedStartArgs({ safeBeta: enabled = false } = {}) {
+  return ["./bin/cyberboss.js", "start", ...(enabled ? [] : ["--checkin"])];
+}
 
 async function main() {
+  assertSafeBetaStartAllowed({
+    safeBeta,
+    mode: "shared:start",
+    allowedUserIds: String(process.env.CYBERBOSS_ALLOWED_USER_IDS || "").split(","),
+  });
   const runtime = process.env.CYBERBOSS_RUNTIME || "codex";
   console.log(`starting shared bridge runtime=${runtime}`);
   const appServer = await ensureSharedAppServer();
@@ -26,13 +37,13 @@ async function main() {
     return;
   }
 
-  const childEnv = { ...process.env };
+  const childEnv = safeBeta ? buildSafeCodexEnv(process.env) : { ...process.env };
   const isCodex = runtime === "codex";
   if (isCodex) {
     childEnv.CYBERBOSS_CODEX_ENDPOINT = listenUrl;
   }
 
-  const child = spawn(process.execPath, ["./bin/cyberboss.js", "start", "--checkin"], {
+  const child = spawn(process.execPath, buildSharedStartArgs({ safeBeta }), {
     cwd: rootDir,
     env: childEnv,
     stdio: "inherit",
@@ -58,7 +69,11 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error(error.message || String(error));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message || String(error));
+    process.exit(1);
+  });
+}
+
+module.exports = { buildSharedStartArgs, main };

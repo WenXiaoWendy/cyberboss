@@ -12,7 +12,11 @@ const {
 } = require("./message-utils");
 const { findModelByQuery } = require("./model-catalog");
 const { SessionStore } = require("./session-store");
-const { resolveCodexProjectToolMcpServerConfig } = require("./mcp-config");
+const {
+  resolveCodexProjectToolMcpServerConfig,
+  resolveSafeBetaMemoryMcpServerConfig,
+} = require("./mcp-config");
+const { buildSafeCodexEnv } = require("../../../core/safe-beta");
 
 function createCodexRuntimeAdapter(config) {
   const sessionStore = new SessionStore({ filePath: config.sessionsFile, runtimeId: "codex" });
@@ -33,12 +37,20 @@ function createCodexRuntimeAdapter(config) {
 
   function ensureClient() {
     if (!client) {
+      const mcpServerConfig = config.safeBeta
+        ? resolveSafeBetaMemoryMcpServerConfig({
+          pythonPath: config.memoryPythonPath,
+          memoryAgentRoot: config.memoryAgentRoot,
+          databasePath: config.memoryDatabasePath,
+        })
+        : resolveCodexProjectToolMcpServerConfig();
       client = new CodexRpcClient({
         endpoint: config.codexEndpoint,
         codexCommand: config.codexCommand,
-        env: process.env,
-        extraWritableRoots: [config.stateDir],
-        mcpServerConfig: resolveCodexProjectToolMcpServerConfig(),
+        env: config.safeBeta ? buildSafeCodexEnv(process.env) : process.env,
+        extraWritableRoots: config.safeBeta ? [] : [config.stateDir],
+        mcpServerConfig,
+        safeBeta: config.safeBeta,
       });
     }
     return client;

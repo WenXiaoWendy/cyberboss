@@ -3,22 +3,15 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const { applyCyberbossEnv } = require("../src/core/env-loader");
+const { buildSafeCodexEnv, isSafeBetaEnabled } = require("../src/core/safe-beta");
 const {
   buildCodexMcpConfigArgs,
   resolveCodexProjectToolMcpServerConfig,
+  resolveSafeBetaMemoryMcpServerConfig,
 } = require("../src/adapters/runtime/codex/mcp-config");
 
-try {
-  require("dotenv").config({ path: path.join(process.cwd(), ".env") });
-} catch {
-  // ignore
-}
-
-try {
-  require("dotenv").config({ path: path.join(os.homedir(), ".cyberboss", ".env") });
-} catch {
-  // ignore
-}
+applyCyberbossEnv();
 
 const rootDir = path.resolve(__dirname, "..");
 const port = String(process.env.CYBERBOSS_SHARED_PORT || "8765");
@@ -30,6 +23,7 @@ const bridgePidFile = path.join(logDir, "shared-wechat.pid");
 const appServerLogFile = path.join(logDir, "shared-app-server.log");
 const accountsDir = path.join(stateDir, "accounts");
 const sessionFile = process.env.CYBERBOSS_SESSIONS_FILE || path.join(stateDir, "sessions.json");
+const safeBeta = isSafeBetaEnabled(process.env.CYBERBOSS_SAFE_BETA);
 
 function ensureLogDir() {
   fs.mkdirSync(logDir, { recursive: true });
@@ -110,7 +104,7 @@ function spawnDetachedCommand(command, args, { logFile, cwd = rootDir, env = {} 
   const stderrFd = openLogFile(logFile);
   const child = spawn(command, args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...(safeBeta ? buildSafeCodexEnv(process.env) : process.env), ...env },
     detached: true,
     stdio: ["ignore", stdoutFd, stderrFd],
     shell: process.platform === "win32",
@@ -147,9 +141,16 @@ async function ensureSharedAppServer() {
   }
 
   const command = process.env.CYBERBOSS_CODEX_COMMAND || "codex";
-  const mcpConfigArgs = buildCodexMcpConfigArgs(resolveCodexProjectToolMcpServerConfig({
-    cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
-  }));
+  const mcpServerConfig = safeBeta
+    ? resolveSafeBetaMemoryMcpServerConfig({
+      pythonPath: process.env.CYBERBOSS_MEMORY_PYTHON,
+      memoryAgentRoot: process.env.CYBERBOSS_MEMORY_AGENT_ROOT,
+      databasePath: process.env.CYBERBOSS_MEMORY_SQLITE,
+    })
+    : resolveCodexProjectToolMcpServerConfig({
+      cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
+    });
+  const mcpConfigArgs = buildCodexMcpConfigArgs(mcpServerConfig);
   const pid = spawnDetachedCommand(command, [...mcpConfigArgs, "app-server", "--listen", listenUrl], {
     logFile: appServerLogFile,
     env,
@@ -282,4 +283,5 @@ module.exports = {
   ensureSharedAppServer,
   ensureBridgeNotRunning,
   resolveBoundThread,
+  safeBeta,
 };

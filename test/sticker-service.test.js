@@ -17,16 +17,17 @@ const {
 function createConfig(overrides = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-test-"));
   const stickersDir = path.join(stateDir, "stickers");
+  const projectRoot = path.resolve(__dirname, "..");
   return {
     stateDir,
     stickersDir,
     stickerAssetsDir: path.join(stickersDir, "assets"),
     stickersIndexFile: path.join(stickersDir, "index.json"),
     stickerTagsFile: path.join(stickersDir, "tags.json"),
-    stickersTemplateDir: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers"),
-    stickersTemplateIndexFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "index.json"),
-    stickerTagsTemplateFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "tags.json"),
-    stickerNormalizeGifScript: path.join("/Users/tingyiwen/Dev/cyberboss", "scripts", "normalize-sticker-gif.js"),
+    stickersTemplateDir: path.join(projectRoot, "templates", "stickers"),
+    stickersTemplateIndexFile: path.join(projectRoot, "templates", "stickers", "index.json"),
+    stickerTagsTemplateFile: path.join(projectRoot, "templates", "stickers", "tags.json"),
+    stickerNormalizeGifScript: path.join(projectRoot, "scripts", "normalize-sticker-gif.js"),
     accountsDir: path.join(stateDir, "accounts"),
     weixinBaseUrl: "https://ilinkai.weixin.qq.com",
     workspaceId: "default",
@@ -80,6 +81,13 @@ function writeTinyGif(filePath) {
   const gifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, Buffer.from(gifBase64, "base64"));
+}
+
+function writeInboxGif(config, fileName) {
+  const inboxDir = path.join(config.stateDir, "inbox", "2026-04-29");
+  const filePath = path.join(inboxDir, fileName);
+  writeTinyGif(filePath);
+  return filePath;
 }
 
 test("sticker service initializes the default tag catalog", () => {
@@ -142,7 +150,7 @@ test("sticker service exposes the current tag catalog on demand", async () => {
 test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, and notifies once", async () => {
   const config = createConfig();
   const { service, sentTexts } = createService(config);
-  const inboxPath = writeInboxPng(config, "cat.png");
+  const inboxPath = writeInboxGif(config, "cat.gif");
 
   const first = await service.saveFromInbox({
     items: [{
@@ -188,8 +196,8 @@ test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, a
 test("sticker service saves inbox images from an items array and keeps the tag catalog deduped", async () => {
   const config = createConfig();
   const { service, sentTexts } = createService(config);
-  const inboxPathA = writeInboxPng(config, "batch-a.png");
-  const inboxPathB = writeInboxPng(config, "batch-b.png");
+  const inboxPathA = writeInboxGif(config, "batch-a.gif");
+  const inboxPathB = writeInboxGif(config, "batch-b.gif");
 
   const batch = await service.saveFromInbox({
     items: [{
@@ -229,7 +237,7 @@ test("sticker service rejects batch saves larger than 10 items", async () => {
 test("sticker service updates, picks, sends, and deletes saved stickers", async () => {
   const config = createConfig();
   const { service, sentTexts, sentFiles } = createService(config);
-  const inboxPath = writeInboxPng(config, "smile.png");
+  const inboxPath = writeInboxGif(config, "smile.gif");
   const saved = await service.saveFromInbox({
     items: [{
       filePath: inboxPath,

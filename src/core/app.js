@@ -62,14 +62,18 @@ class CyberbossApp {
   constructor(config) {
     this.config = config;
     this.channelAdapter = createWeixinChannelAdapter(config);
-    this.timelineIntegration = createTimelineIntegration(config);
-    const projectTooling = createProjectTooling(config, {
-      channelAdapter: this.channelAdapter,
-      timelineIntegration: this.timelineIntegration,
-    });
-    this.projectServices = projectTooling.services;
-    this.projectToolHost = projectTooling.toolHost;
-    this.runtimeContextStore = projectTooling.runtimeContextStore;
+    this.timelineIntegration = config.safeBeta
+      ? { describe: () => ({ id: "disabled", kind: "integration" }) }
+      : createTimelineIntegration(config);
+    const projectTooling = config.safeBeta
+      ? null
+      : createProjectTooling(config, {
+        channelAdapter: this.channelAdapter,
+        timelineIntegration: this.timelineIntegration,
+      });
+    this.projectServices = projectTooling?.services || null;
+    this.projectToolHost = projectTooling?.toolHost || null;
+    this.runtimeContextStore = projectTooling?.runtimeContextStore || null;
     this.runtimeAdapter = createRuntimeAdapter(config);
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
@@ -123,11 +127,13 @@ class CyberbossApp {
   async start() {
     const account = this.channelAdapter.resolveAccount();
     this.activeAccountId = account.accountId;
-    this.systemMessageDispatcher = new SystemMessageDispatcher({
-      queueStore: this.systemMessageQueue,
-      config: this.config,
-      accountId: account.accountId,
-    });
+    if (!this.config.safeBeta) {
+      this.systemMessageDispatcher = new SystemMessageDispatcher({
+        queueStore: this.systemMessageQueue,
+        config: this.config,
+        accountId: account.accountId,
+      });
+    }
     const runtimeState = await this.runtimeAdapter.initialize();
     const knownContextTokens = Object.keys(this.channelAdapter.getKnownContextTokens()).length;
     const syncBuffer = this.channelAdapter.loadSyncBuffer();
@@ -137,8 +143,10 @@ class CyberbossApp {
     console.log(`[cyberboss] channel=${this.channelAdapter.describe().id}`);
     console.log(`[cyberboss] runtime=${this.runtimeAdapter.describe().id}`);
     console.log(`[cyberboss] timeline=${this.timelineIntegration.describe().id}`);
-    console.log(`[cyberboss] account=${account.accountId}`);
-    console.log(`[cyberboss] baseUrl=${account.baseUrl}`);
+    console.log(`[cyberboss] account=${this.config.safeBeta ? "(configured)" : account.accountId}`);
+    if (!this.config.safeBeta) {
+      console.log(`[cyberboss] baseUrl=${account.baseUrl}`);
+    }
     console.log(`[cyberboss] workspaceRoot=${this.config.workspaceRoot}`);
     console.log(`[cyberboss] knownContextTokens=${knownContextTokens}`);
     console.log(`[cyberboss] syncBuffer=${syncBuffer ? "ready" : "empty"}`);
@@ -165,12 +173,14 @@ class CyberbossApp {
       let consecutiveFailures = 0;
       while (!shutdown.stopped) {
         try {
-          await Promise.all([
-            this.flushDueReminders(account),
-            this.flushPendingInboundMessages(),
-            this.flushPendingSystemMessages(),
-            this.flushPendingTimelineScreenshots(account),
-          ]);
+          await (this.config.safeBeta
+            ? this.flushPendingInboundMessages()
+            : Promise.all([
+              this.flushDueReminders(account),
+              this.flushPendingInboundMessages(),
+              this.flushPendingSystemMessages(),
+              this.flushPendingTimelineScreenshots(account),
+            ]));
           const response = await this.channelAdapter.getUpdates({
             syncBuffer: this.channelAdapter.loadSyncBuffer(),
             timeoutMs: this.resolveLongPollTimeoutMs(),
@@ -184,12 +194,14 @@ class CyberbossApp {
             }
             await this.handleIncomingMessage(message);
           }
-          await Promise.all([
-            this.flushDueReminders(account),
-            this.flushPendingInboundMessages(),
-            this.flushPendingSystemMessages(),
-            this.flushPendingTimelineScreenshots(account),
-          ]);
+          if (!this.config.safeBeta) {
+            await Promise.all([
+              this.flushDueReminders(account),
+              this.flushPendingInboundMessages(),
+              this.flushPendingSystemMessages(),
+              this.flushPendingTimelineScreenshots(account),
+            ]);
+          }
         } catch (error) {
           if (shutdown.stopped) {
             break;
@@ -329,7 +341,7 @@ class CyberbossApp {
     }
 
     this.primeDeferredRepliesForSender(normalized);
-    await this.handlePreparedMessage(normalized, { allowCommands: true });
+    await this.handlePreparedMessage(normalized, { allowCommands: !this.config.safeBeta });
   }
 
   deferSystemReply({ threadId = "", userId = "", text = "", error = null, kind = "plain_reply" }) {
@@ -880,6 +892,9 @@ class CyberbossApp {
   }
 
   resolveLongPollTimeoutMs() {
+    if (this.config?.safeBeta) {
+      return DEFAULT_LONG_POLL_TIMEOUT_MS;
+    }
     if (this.systemMessageDispatcher?.hasPending()) {
       return MIN_LONG_POLL_TIMEOUT_MS;
     }
@@ -1538,6 +1553,13 @@ class CyberbossApp {
     const sessionStore = this.runtimeAdapter.getSessionStore();
     const linked = sessionStore.findBindingForThreadId(event.payload.threadId);
     if (!linked?.workspaceRoot) {
+      return;
+    }
+    if (this.config?.safeBeta) {
+      const rejection = buildApprovalResponsePayload(event.payload, "no")
+        || { requestId: event.payload.requestId, decision: "decline" };
+      await this.runtimeAdapter.respondApproval(rejection).catch(() => {});
+      this.threadStateStore.resolveApproval(event.payload.threadId, "running");
       return;
     }
     const allowlist = sessionStore.getApprovalCommandAllowlistForWorkspace(linked.workspaceRoot);

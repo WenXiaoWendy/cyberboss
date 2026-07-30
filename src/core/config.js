@@ -1,14 +1,17 @@
 const os = require("os");
 const path = require("path");
+const { isSafeBetaEnabled, resolveSafeBetaConfig } = require("./safe-beta");
 
 function readConfig() {
   const argv = process.argv.slice(2);
   const mode = argv[0] || "";
   const stateDir = process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
+  const safeBeta = isSafeBetaEnabled(process.env.CYBERBOSS_SAFE_BETA);
 
-  return {
+  return resolveSafeBetaConfig({
     mode,
     argv,
+    safeBeta,
     stateDir,
     workspaceId: readTextEnv("CYBERBOSS_WORKSPACE_ID") || "default",
     workspaceRoot: readTextEnv("CYBERBOSS_WORKSPACE_ROOT") || process.cwd(),
@@ -65,6 +68,9 @@ function readConfig() {
     codexModel: readTextEnv("CYBERBOSS_CODEX_MODEL"),
     codexModelProvider: readTextEnv("CYBERBOSS_CODEX_MODEL_PROVIDER"),
     codexNativeImageInput: readOptionalBoolEnv("CYBERBOSS_CODEX_NATIVE_IMAGE_INPUT"),
+    memoryPythonPath: readTextEnv("CYBERBOSS_MEMORY_PYTHON"),
+    memoryAgentRoot: readTextEnv("CYBERBOSS_MEMORY_AGENT_ROOT"),
+    memoryDatabasePath: readTextEnv("CYBERBOSS_MEMORY_SQLITE"),
     visionMode: readTextEnv("CYBERBOSS_VISION_MODE") || "auto",
     visionProvider: readTextEnv("CYBERBOSS_VISION_PROVIDER") || "openai-compatible",
     visionApiBaseUrl: readTextEnv("CYBERBOSS_VISION_API_BASE_URL"),
@@ -80,7 +86,10 @@ function readConfig() {
     claudeExtraArgs: readListEnv("CYBERBOSS_CLAUDE_EXTRA_ARGS"),
     sessionsFile: path.join(stateDir, "sessions.json"),
     startWithCheckin: (mode === "start" && hasArgFlag(argv, "--checkin")) || readBoolEnv("CYBERBOSS_ENABLE_CHECKIN"),
-  };
+    enableRandomWake: readBoolEnv("CYBERBOSS_ENABLE_RANDOM_WAKE"),
+    enableSystemMessages: true,
+    enableProjectTools: true,
+  });
 }
 
 function readListEnv(name) {

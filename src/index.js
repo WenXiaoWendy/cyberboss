@@ -1,9 +1,13 @@
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
-const dotenv = require("dotenv");
 
 const { readConfig } = require("./core/config");
+const { createWeixinChannelAdapter } = require("./adapters/channel/weixin");
+const { applyCyberbossEnv } = require("./core/env-loader");
+const {
+  assertSafeBetaStartAllowed,
+  validateMemoryMcpPaths,
+} = require("./core/safe-beta");
 const { renderInstructionTemplate } = require("./core/instructions-template");
 const { CyberbossApp } = require("./core/app");
 const { runSystemCheckinPoller } = require("./app/system-checkin-poller");
@@ -12,24 +16,8 @@ const { ensureStickerCatalogFilesSync } = require("./services/sticker-service");
 const { createProjectTooling } = require("./tools/create-project-tooling");
 const { runToolMcpServer } = require("./tools/mcp-stdio-server");
 
-function ensureDefaultStateDirectory() {
-  fs.mkdirSync(path.join(os.homedir(), ".cyberboss"), { recursive: true });
-}
-
 function loadEnv() {
-  ensureDefaultStateDirectory();
-  const candidates = [
-    path.join(process.cwd(), ".env"),
-    path.join(os.homedir(), ".cyberboss", ".env"),
-  ];
-  for (const envPath of candidates) {
-    if (!fs.existsSync(envPath)) {
-      continue;
-    }
-    dotenv.config({ path: envPath });
-    return;
-  }
-  dotenv.config();
+  return applyCyberbossEnv();
 }
 
 function ensureRuntimeEnv() {
@@ -40,7 +28,9 @@ function ensureRuntimeEnv() {
 
 function ensureBootstrapFiles(config) {
   ensureInstructionsTemplate(config);
-  ensureStickerCatalogFilesSync(config);
+  if (!config.safeBeta) {
+    ensureStickerCatalogFilesSync(config);
+  }
 }
 
 function ensureInstructionsTemplate(config) {
@@ -98,7 +88,6 @@ async function main() {
   installRuntimeErrorHooks();
   const argv = process.argv.slice(2);
   const config = readConfig();
-  ensureBootstrapFiles(config);
   const command = config.mode || "help";
   let app = null;
   const getApp = () => {
@@ -119,7 +108,12 @@ async function main() {
   }
 
   if (command === "login") {
-    await getApp().login();
+    ensureBootstrapFiles(config);
+    if (config.safeBeta) {
+      await createWeixinChannelAdapter(config).login();
+    } else {
+      await getApp().login();
+    }
     return;
   }
 
@@ -129,11 +123,23 @@ async function main() {
   }
 
   if (command === "start") {
+    assertSafeBetaStartAllowed(config);
+    if (config.safeBeta) {
+      validateMemoryMcpPaths({
+        pythonPath: config.memoryPythonPath,
+        memoryAgentRoot: config.memoryAgentRoot,
+        databasePath: config.memoryDatabasePath,
+      });
+    }
+    ensureBootstrapFiles(config);
     await getApp().start();
     return;
   }
 
   if (command === "tool-mcp-server") {
+    if (config.safeBeta) {
+      throw new Error("Safe Beta refuses to start cyberboss_tools.");
+    }
     const runtimeId = readFlagValue(argv.slice(1), "--runtime-id") || "";
     const workspaceRoot = readFlagValue(argv.slice(1), "--workspace-root") || process.cwd();
     const { toolHost } = createProjectTooling(config);
