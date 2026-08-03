@@ -22,12 +22,17 @@ function buildSharedStartArgs({ safeBeta: enabled = false, preflightOnly = false
 }
 
 async function main() {
+  const preflightOnly = process.argv.includes("--state-dir-preflight-only");
   assertSafeBetaStartAllowed({
     safeBeta,
     mode: "shared:start",
     allowedUserIds: String(process.env.CYBERBOSS_ALLOWED_USER_IDS || "").split(","),
   });
-  if (process.argv.includes("--state-dir-preflight-only")) {
+  assertSafeSharedStartLifecycle({
+    safeBeta,
+    preflightOnly,
+  });
+  if (preflightOnly) {
     await runStateDirPreflightChild();
     return;
   }
@@ -113,4 +118,17 @@ function runStateDirPreflightChild() {
   });
 }
 
-module.exports = { buildSharedStartArgs, main };
+function assertSafeSharedStartLifecycle({
+  safeBeta: enabled = false,
+  preflightOnly = false,
+} = {}) {
+  if (enabled && !preflightOnly) {
+    throw new Error("Safe Beta requires the owned npm run start lifecycle; shared:start is disabled.");
+  }
+}
+
+module.exports = {
+  assertSafeSharedStartLifecycle,
+  buildSharedStartArgs,
+  main,
+};

@@ -4,6 +4,7 @@ const path = require("path");
 const { readConfig } = require("./core/config");
 const { createWeixinChannelAdapter } = require("./adapters/channel/weixin");
 const { applyCyberbossEnv, resolveCyberbossEnv } = require("./core/env-loader");
+const { createChildIpcLifecycle } = require("./core/child-ipc-lifecycle");
 const {
   assertSafeBetaStartAllowed,
   isSafeBetaEnabled,
@@ -149,7 +150,12 @@ async function main() {
       });
     }
     ensureBootstrapFiles(config);
-    await getApp().start();
+    const lifecycle = config.safeBeta ? createChildIpcLifecycle() : null;
+    try {
+      await getApp().start({ lifecycle });
+    } finally {
+      lifecycle?.dispose();
+    }
     return;
   }
 

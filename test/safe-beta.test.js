@@ -8,6 +8,7 @@ const {
   SAFE_MEMORY_TOOLS,
   assertSafeBetaStartAllowed,
   buildMinimalMemoryMcpEnv,
+  buildSafeCodexEnv,
   isSafeBetaEnabled,
   resolveSafeBetaConfig,
   validateMemoryMcpPaths,
@@ -20,7 +21,10 @@ const {
 const {
   buildTurnStartParams,
 } = require("../src/adapters/runtime/codex/rpc-client");
-const { buildSharedStartArgs } = require("../scripts/shared-start");
+const {
+  assertSafeSharedStartLifecycle,
+  buildSharedStartArgs,
+} = require("../scripts/shared-start");
 const { buildSafeBetaDryRunReport } = require("../scripts/safe-beta-dry-run");
 const { loadCyberbossEnv } = require("../src/core/env-loader");
 const { CyberbossApp } = require("../src/core/app");
@@ -121,6 +125,17 @@ test("safe shared start never adds checkin", () => {
     "./bin/cyberboss.js",
     "start",
   ]);
+});
+
+test("safe shared start cannot bypass the owned bridge lifecycle", () => {
+  assert.throws(
+    () => assertSafeSharedStartLifecycle({ safeBeta: true }),
+    /owned npm run start lifecycle/i,
+  );
+  assert.doesNotThrow(() => assertSafeSharedStartLifecycle({
+    safeBeta: true,
+    preflightOnly: true,
+  }));
 });
 
 test("safe configuration force-disables active and privileged capabilities", () => {
@@ -250,6 +265,15 @@ test("Memory MCP child environment excludes Notion and unrelated secrets", () =>
   assert.equal("NOTION_TOKEN" in env, false);
   assert.equal("OPENAI_API_KEY" in env, false);
   assert.equal("CYBERBOSS_SECRET" in env, false);
+});
+
+test("safe Codex child environment excludes the bridge lifecycle token", () => {
+  const env = buildSafeCodexEnv({
+    PATH: "safe-path",
+    CYBERBOSS_RUN_TOKEN: "never-forward",
+  });
+  assert.equal(env.PATH, "safe-path");
+  assert.equal("CYBERBOSS_RUN_TOKEN" in env, false);
 });
 
 test("safe restrictions cannot be overridden by ordinary configuration", () => {

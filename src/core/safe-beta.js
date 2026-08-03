@@ -38,6 +38,7 @@ function buildSafeCodexEnv(baseEnv = process.env) {
       const upper = name.toUpperCase();
       return !upper.startsWith("NOTION_")
         && !upper.startsWith("MEMORY_AGENT_")
+        && upper !== "CYBERBOSS_RUN_TOKEN"
         && !upper.includes("WEIXIN_TOKEN")
         && !upper.includes("SESSION")
         && !upper.includes("COOKIE");

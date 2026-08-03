@@ -124,7 +124,7 @@ class CyberbossApp {
     this.channelAdapter.printAccounts();
   }
 
-  async start() {
+  async start({ lifecycle = null } = {}) {
     const account = this.channelAdapter.resolveAccount();
     this.activeAccountId = account.accountId;
     if (!this.config.safeBeta) {
@@ -155,19 +155,20 @@ class CyberbossApp {
     if (this.config.startWithLocationServer) {
       await this.ensureLocationServerStarted();
     }
+    const shutdown = createShutdownController(async () => {
+      this.clearPendingImageInboundTimers();
+      await this.closeLocationServer();
+      await this.runtimeAdapter.close();
+    });
+    lifecycle?.registerStop(() => shutdown.stop());
     console.log("[cyberboss] bridge loop started; waiting for WeChat messages.");
+    lifecycle?.markReady();
     if (this.config.startWithCheckin) {
       console.log("[cyberboss] checkin: enabled");
       void runSystemCheckinPoller(this.config).catch((error) => {
         console.error(`[cyberboss] checkin poller stopped: ${error.message}`);
       });
     }
-
-    const shutdown = createShutdownController(async () => {
-      this.clearPendingImageInboundTimers();
-      await this.closeLocationServer();
-      await this.runtimeAdapter.close();
-    });
 
     try {
       let consecutiveFailures = 0;
@@ -1832,6 +1833,7 @@ function createShutdownController(onStop) {
     get stopped() {
       return stopped;
     },
+    stop,
     dispose() {
       process.off("SIGINT", handleSignal);
       process.off("SIGTERM", handleSignal);
