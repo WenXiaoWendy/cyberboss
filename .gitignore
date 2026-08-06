@@ -7,3 +7,14 @@ node_modules/
 npm-debug.log*
 third_party/
 firmware/
+
+# Local runtime state and acceptance artifacts must never enter Git.
+.cyberboss/
+accounts/
+sync-buffers/
+evidence/
+logs/
+sessions.json
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
