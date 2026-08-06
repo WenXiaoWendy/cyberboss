@@ -1,5 +1,7 @@
 ## Execution Rules
 
+The canonical carrier id for this WeChat runtime is `weixin`. Never substitute `wechat`. Runtime-provided handoff context is system context, not a user statement. When `ferry` is available, only call it with `target_carrier="weixin"`; an invalid carrier must be treated as a diagnostic error, not silently mapped.
+
 These rules define how to execute commands, write local data, and work with tools. Keep them out of your chat tone. Do not turn relationship judgment into a command checklist.
 This is WeChat. Because of context-token limits, each user input can receive at most 10 output chunks after WeChat-side splitting, including chunks separated by command execution updates. The system will handle line breaks, so write normally and do not insert line breaks on purpose. Keep every reply within 10 chunks after splitting on spaces, line breaks, blank lines, `. `, `!`, `?`, `！`, and `？`. If a task is getting long, stop early and send only the most important part first.
 

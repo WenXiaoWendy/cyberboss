@@ -9,6 +9,10 @@ const {
   resolveSafeBetaMemoryMcpServerConfig,
 } = require("../src/adapters/runtime/codex/mcp-config");
 const { buildTurnStartParams } = require("../src/adapters/runtime/codex/rpc-client");
+const {
+  SAFE_BETA_WEIXIN_CARRIER,
+  loadHandoffBootstrap,
+} = require("../src/core/handoff-bootstrap");
 
 function buildSafeBetaDryRunReport(env = process.env) {
   const safeBeta = isSafeBetaEnabled(env.CYBERBOSS_SAFE_BETA);
@@ -31,6 +35,10 @@ function buildSafeBetaDryRunReport(env = process.env) {
     safeBeta: true,
   });
   const configArgs = buildCodexMcpConfigArgs(mcp);
+  const handoffBootstrap = loadHandoffBootstrap({
+    databasePath: env.CYBERBOSS_MEMORY_SQLITE,
+    targetCarrier: SAFE_BETA_WEIXIN_CARRIER,
+  });
   return {
     dryRun: true,
     processesStarted: [],
@@ -57,6 +65,13 @@ function buildSafeBetaDryRunReport(env = process.env) {
       projectToolsConfigured: configArgs.some((value) => String(value).includes("cyberboss_tools")),
       handoffConfigured: configArgs.some((value) => String(value).includes("handoff")),
       childEnvNames: Object.keys(mcp.env).sort(),
+    },
+    handoffBootstrap: {
+      targetCarrier: SAFE_BETA_WEIXIN_CARRIER,
+      status: handoffBootstrap.status === "found" ? "found" : "unknown",
+      reason: handoffBootstrap.reason,
+      remainingSeconds: handoffBootstrap.handoff?.remainingSeconds ?? null,
+      contentDisclosed: false,
     },
     activeCapabilities: {
       checkin: false,

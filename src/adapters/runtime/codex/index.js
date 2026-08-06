@@ -17,13 +17,20 @@ const {
   resolveSafeBetaMemoryMcpServerConfig,
 } = require("./mcp-config");
 const { buildSafeCodexEnv } = require("../../../core/safe-beta");
+const {
+  SAFE_BETA_WEIXIN_CARRIER,
+  buildHandoffDeveloperInstructions,
+  loadHandoffBootstrap,
+} = require("../../../core/handoff-bootstrap");
 
-function createCodexRuntimeAdapter(config) {
+function createCodexRuntimeAdapter(config, dependencies = {}) {
   const sessionStore = new SessionStore({ filePath: config.sessionsFile, runtimeId: "codex" });
   let client = null;
   let readyState = null;
   const configuredModel = normalizeText(config.codexModel);
   const configuredModelProvider = normalizeText(config.codexModelProvider);
+  const loadBootstrap = dependencies.loadHandoffBootstrap || loadHandoffBootstrap;
+  const RpcClient = dependencies.CodexRpcClient || CodexRpcClient;
 
   function resolveModel(model = "", storedParams = null) {
     if (configuredModel) {
@@ -44,7 +51,7 @@ function createCodexRuntimeAdapter(config) {
           databasePath: config.memoryDatabasePath,
         })
         : resolveCodexProjectToolMcpServerConfig();
-      client = new CodexRpcClient({
+      client = new RpcClient({
         endpoint: config.codexEndpoint,
         codexCommand: config.codexCommand,
         env: config.safeBeta ? buildSafeCodexEnv(process.env) : process.env,
@@ -213,10 +220,19 @@ function createCodexRuntimeAdapter(config) {
       });
       let outboundText = text;
       if (!threadId) {
+        const handoffBootstrap = config.safeBeta
+          ? loadBootstrap({
+            databasePath: config.memoryDatabasePath,
+            targetCarrier: SAFE_BETA_WEIXIN_CARRIER,
+          })
+          : null;
         const response = await runtimeClient.startThread({
           cwd: workspaceRoot,
           model: desiredModel,
           modelProvider: desiredModelProvider,
+          developerInstructions: handoffBootstrap
+            ? buildHandoffDeveloperInstructions(handoffBootstrap)
+            : "",
         });
         threadId = extractThreadId(response);
         if (!threadId) {
@@ -231,10 +247,19 @@ function createCodexRuntimeAdapter(config) {
           modelProvider: desiredModelProvider,
         }).catch(async () => {
           sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot);
+          const handoffBootstrap = config.safeBeta
+            ? loadBootstrap({
+              databasePath: config.memoryDatabasePath,
+              targetCarrier: SAFE_BETA_WEIXIN_CARRIER,
+            })
+            : null;
           const recreated = await runtimeClient.startThread({
             cwd: workspaceRoot,
             model: desiredModel,
             modelProvider: desiredModelProvider,
+            developerInstructions: handoffBootstrap
+              ? buildHandoffDeveloperInstructions(handoffBootstrap)
+              : "",
           });
           threadId = extractThreadId(recreated);
           if (!threadId) {

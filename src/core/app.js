@@ -42,6 +42,7 @@ const {
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 const { createProjectTooling } = require("../tools/create-project-tooling");
+const { evaluateSafeMemoryMcpApproval } = require("./safe-beta");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
 const SESSION_EXPIRED_ERRCODE = -14;
@@ -1557,9 +1558,17 @@ class CyberbossApp {
       return;
     }
     if (this.config?.safeBeta) {
-      const rejection = buildApprovalResponsePayload(event.payload, "no")
-        || { requestId: event.payload.requestId, decision: "decline" };
-      await this.runtimeAdapter.respondApproval(rejection).catch(() => {});
+      const evaluation = evaluateSafeMemoryMcpApproval(event.payload);
+      const command = evaluation.allowed ? "yes" : "no";
+      const response = buildApprovalResponsePayload(event.payload, command)
+        || {
+          requestId: event.payload.requestId,
+          decision: evaluation.allowed ? "accept" : "decline",
+        };
+      console.log(
+        `[cyberboss] safe-beta MCP approval action=${evaluation.allowed ? "accept" : "decline"} reason=${evaluation.reason} tool=${evaluation.toolName || "unknown"}`
+      );
+      await this.runtimeAdapter.respondApproval(response).catch(() => {});
       this.threadStateStore.resolveApproval(event.payload.threadId, "running");
       return;
     }

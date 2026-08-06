@@ -8,6 +8,8 @@ const SAFE_MEMORY_TOOLS = Object.freeze([
   "memory_trigger",
   "ferry",
 ]);
+const SAFE_MEMORY_SERVER = "xingxing-memory";
+const SAFE_BETA_WEIXIN_CARRIER = "weixin";
 
 function isSafeBetaEnabled(value) {
   return typeof value === "string" && value.trim().toLowerCase() === "true";
@@ -93,6 +95,39 @@ function buildMinimalMemoryMcpEnv(baseEnv, pythonPathRoot) {
   return env;
 }
 
+function evaluateSafeMemoryMcpApproval(approval = {}) {
+  const elicitation = approval?.elicitation && typeof approval.elicitation === "object"
+    ? approval.elicitation
+    : {};
+  const serverName = normalizeText(elicitation.serverName);
+  const toolName = normalizeText(elicitation.toolName);
+  if (approval?.kind !== "mcp_tool_call" || serverName !== SAFE_MEMORY_SERVER) {
+    return { allowed: false, reason: "server_not_allowed", toolName };
+  }
+  if (!SAFE_MEMORY_TOOLS.includes(toolName)) {
+    return { allowed: false, reason: "tool_not_allowed", toolName };
+  }
+  if (toolName === "ferry") {
+    const targetCarrier = findToolParam(elicitation.toolParamsDisplay, "target_carrier");
+    if (targetCarrier !== SAFE_BETA_WEIXIN_CARRIER) {
+      return { allowed: false, reason: "invalid_carrier", toolName };
+    }
+  }
+  return { allowed: true, reason: "allowlisted_read_tool", toolName };
+}
+
+function findToolParam(values, name) {
+  if (!Array.isArray(values)) {
+    return undefined;
+  }
+  const match = values.find((entry) => normalizeText(entry?.name) === name);
+  return typeof match?.value === "string" ? match.value : match?.value;
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function normalizeList(values) {
   return Array.isArray(values)
     ? values.map((value) => String(value || "").trim()).filter(Boolean)
@@ -114,10 +149,12 @@ function assertDirectory(directoryPath, label) {
 }
 
 module.exports = {
+  SAFE_BETA_WEIXIN_CARRIER,
   SAFE_MEMORY_TOOLS,
   assertSafeBetaStartAllowed,
   buildSafeCodexEnv,
   buildMinimalMemoryMcpEnv,
+  evaluateSafeMemoryMcpApproval,
   isSafeBetaEnabled,
   resolveSafeBetaConfig,
   validateMemoryMcpPaths,

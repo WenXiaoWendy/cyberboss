@@ -168,8 +168,13 @@ class CodexRpcClient {
       : this.sendRequest("thread/start", { input });
   }
 
-  async startThread({ cwd, model = "", modelProvider = "" }) {
-    return this.sendRequest("thread/start", buildStartThreadParams({ cwd, model, modelProvider }));
+  async startThread({ cwd, model = "", modelProvider = "", developerInstructions = "" }) {
+    return this.sendRequest("thread/start", buildStartThreadParams({
+      cwd,
+      model,
+      modelProvider,
+      developerInstructions,
+    }));
   }
 
   async resumeThread({ threadId, model = "", modelProvider = "" }) {
@@ -345,11 +350,12 @@ function normalizeNonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
-function buildStartThreadParams({ cwd, model, modelProvider }) {
+function buildStartThreadParams({ cwd, model, modelProvider, developerInstructions = "" }) {
   const params = {};
   const normalizedCwd = normalizeNonEmptyString(cwd);
   const normalizedModel = normalizeNonEmptyString(model);
   const normalizedModelProvider = normalizeNonEmptyString(modelProvider);
+  const normalizedDeveloperInstructions = normalizeNonEmptyString(developerInstructions);
   if (normalizedCwd) {
     params.cwd = normalizedCwd;
   }
@@ -358,6 +364,9 @@ function buildStartThreadParams({ cwd, model, modelProvider }) {
   }
   if (normalizedModelProvider) {
     params.modelProvider = normalizedModelProvider;
+  }
+  if (normalizedDeveloperInstructions) {
+    params.developerInstructions = normalizedDeveloperInstructions;
   }
   return params;
 }
@@ -524,4 +533,4 @@ function waitForSocketOpen(socket) {
   });
 }
 
-module.exports = { CodexRpcClient, buildTurnStartParams };
+module.exports = { CodexRpcClient, buildStartThreadParams, buildTurnStartParams };

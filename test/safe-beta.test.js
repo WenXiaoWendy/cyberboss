@@ -6,6 +6,7 @@ const path = require("node:path");
 
 const {
   SAFE_MEMORY_TOOLS,
+  evaluateSafeMemoryMcpApproval,
   assertSafeBetaStartAllowed,
   buildMinimalMemoryMcpEnv,
   buildSafeCodexEnv,
@@ -333,6 +334,8 @@ test("safe dry-run starts no process and exposes no active capability", () => {
   assert.deepEqual(report.mcp.servers, ["xingxing-memory"]);
   assert.equal(report.mcp.projectToolsConfigured, false);
   assert.equal(report.mcp.handoffConfigured, false);
+  assert.equal(report.handoffBootstrap.targetCarrier, "weixin");
+  assert.equal(report.handoffBootstrap.contentDisclosed, false);
   assert.equal(Object.values(report.activeCapabilities).some(Boolean), false);
 });
 
@@ -373,4 +376,152 @@ test("safe runtime declines every unexpected Codex approval instead of auto-appr
 
   assert.deepEqual(responses, [{ requestId: "request", decision: "decline" }]);
   assert.deepEqual(resolved, [{ threadId: "thread", status: "running" }]);
+});
+
+test("safe beta auto-approves only exact xingxing-memory read tools", () => {
+  for (const toolName of SAFE_MEMORY_TOOLS) {
+    const toolParamsDisplay = toolName === "ferry"
+      ? [{ name: "target_carrier", value: "weixin" }]
+      : [];
+    assert.deepEqual(
+      evaluateSafeMemoryMcpApproval({
+        kind: "mcp_tool_call",
+        elicitation: {
+          serverName: "xingxing-memory",
+          toolName,
+          toolParamsDisplay,
+        },
+      }),
+      { allowed: true, reason: "allowlisted_read_tool", toolName },
+    );
+  }
+});
+
+test("safe beta rejects non-allowlisted MCP tools and server prefix lookalikes", () => {
+  for (const approval of [
+    {
+      kind: "mcp_tool_call",
+      elicitation: { serverName: "xingxing-memory", toolName: "handoff", toolParamsDisplay: [] },
+    },
+    {
+      kind: "mcp_tool_call",
+      elicitation: { serverName: "xingxing-memory-evil", toolName: "recall", toolParamsDisplay: [] },
+    },
+    {
+      kind: "mcp_tool_call",
+      elicitation: { serverName: "cyberboss_tools", toolName: "system_send", toolParamsDisplay: [] },
+    },
+  ]) {
+    assert.equal(evaluateSafeMemoryMcpApproval(approval).allowed, false);
+  }
+});
+
+test("safe beta rejects ferry unless target carrier is exactly weixin", () => {
+  for (const value of ["wechat", "", " weixin ", undefined]) {
+    const result = evaluateSafeMemoryMcpApproval({
+      kind: "mcp_tool_call",
+      elicitation: {
+        serverName: "xingxing-memory",
+        toolName: "ferry",
+        toolParamsDisplay: [{ name: "target_carrier", value }],
+      },
+    });
+    assert.deepEqual(result, {
+      allowed: false,
+      reason: "invalid_carrier",
+      toolName: "ferry",
+    });
+  }
+});
+
+test("safe runtime accepts an exact allowlisted ferry approval", async () => {
+  const responses = [];
+  const resolved = [];
+  const app = Object.create(CyberbossApp.prototype);
+  app.config = { safeBeta: true };
+  app.streamDelivery = { async handleRuntimeEvent() {} };
+  app.runtimeAdapter = {
+    getSessionStore() {
+      return {
+        findBindingForThreadId() {
+          return { workspaceRoot: "C:\\workspace", bindingKey: "binding" };
+        },
+      };
+    },
+    async respondApproval(payload) { responses.push(payload); },
+  };
+  app.threadStateStore = {
+    resolveApproval(threadId, status) { resolved.push({ threadId, status }); },
+  };
+
+  await app.handleRuntimeEvent({
+    type: "runtime.approval.requested",
+    payload: {
+      kind: "mcp_tool_call",
+      threadId: "thread",
+      requestId: "request",
+      elicitation: {
+        serverName: "xingxing-memory",
+        toolName: "ferry",
+        toolParamsDisplay: [{ name: "target_carrier", value: "weixin" }],
+      },
+      responseTemplate: {
+        responseByCommand: {
+          yes: { action: "accept" },
+          no: { action: "cancel" },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(responses, [{ requestId: "request", result: { action: "accept" } }]);
+  assert.deepEqual(resolved, [{ threadId: "thread", status: "running" }]);
+});
+
+test("safe runtime rejects wechat ferry with a diagnostic invalid carrier reason", async () => {
+  const responses = [];
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (message) => logs.push(String(message));
+  try {
+    const app = Object.create(CyberbossApp.prototype);
+    app.config = { safeBeta: true };
+    app.streamDelivery = { async handleRuntimeEvent() {} };
+    app.runtimeAdapter = {
+      getSessionStore() {
+        return {
+          findBindingForThreadId() {
+            return { workspaceRoot: "C:\\workspace", bindingKey: "binding" };
+          },
+        };
+      },
+      async respondApproval(payload) { responses.push(payload); },
+    };
+    app.threadStateStore = { resolveApproval() {} };
+
+    await app.handleRuntimeEvent({
+      type: "runtime.approval.requested",
+      payload: {
+        kind: "mcp_tool_call",
+        threadId: "thread",
+        requestId: "request",
+        elicitation: {
+          serverName: "xingxing-memory",
+          toolName: "ferry",
+          toolParamsDisplay: [{ name: "target_carrier", value: "wechat" }],
+        },
+        responseTemplate: {
+          responseByCommand: {
+            yes: { action: "accept" },
+            no: { action: "cancel" },
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(responses, [{ requestId: "request", result: { action: "cancel" } }]);
+    assert.equal(logs.some((line) => line.includes("reason=invalid_carrier")), true);
+  } finally {
+    console.log = originalLog;
+  }
 });
