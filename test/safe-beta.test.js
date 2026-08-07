@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const {
+  SAFE_CODEX_ENV_ALLOWLIST,
   SAFE_MEMORY_TOOLS,
   evaluateSafeMemoryMcpApproval,
   assertSafeBetaStartAllowed,
@@ -268,13 +269,88 @@ test("Memory MCP child environment excludes Notion and unrelated secrets", () =>
   assert.equal("CYBERBOSS_SECRET" in env, false);
 });
 
-test("safe Codex child environment excludes the bridge lifecycle token", () => {
-  const env = buildSafeCodexEnv({
+test("safe Codex child environment uses an explicit allowlist without mutating input", () => {
+  const input = {
     PATH: "safe-path",
-    CYBERBOSS_RUN_TOKEN: "never-forward",
-  });
-  assert.equal(env.PATH, "safe-path");
-  assert.equal("CYBERBOSS_RUN_TOKEN" in env, false);
+    Path: "safe-path-case",
+    SystemRoot: "system-root",
+    SYSTEMROOT: "system-root-case",
+    WINDIR: "windows-root",
+    TEMP: "safe-temp",
+    TMP: "safe-tmp",
+    ComSpec: "command-shell",
+    PATHEXT: ".EXE;.CMD",
+    CODEX_HOME: "codex-home",
+    HOME: "home-must-not-pass",
+    USERPROFILE: "user-profile-must-not-pass",
+    APPDATA: "app-data-must-not-pass",
+    LOCALAPPDATA: "local-app-data-must-not-pass",
+    OPENAI_API_KEY: "openai-secret",
+    GITHUB_TOKEN: "github-secret",
+    GH_TOKEN: "gh-secret",
+    AWS_ACCESS_KEY_ID: "aws-key",
+    AWS_SECRET_ACCESS_KEY: "aws-secret",
+    AZURE_CLIENT_SECRET: "azure-secret",
+    GOOGLE_APPLICATION_CREDENTIALS: "google-secret-path",
+    NOTION_TOKEN: "notion-secret",
+    MEMORY_AGENT_TOKEN: "memory-secret",
+    CYBERBOSS_RUN_TOKEN: "run-token",
+    WEIXIN_COOKIE: "cookie-secret",
+    LOGIN_SESSION: "session-secret",
+    SECRET_EXAMPLE: "unknown-secret",
+    INTERNAL_TOKEN: "internal-secret",
+  };
+  const before = { ...input };
+  const env = buildSafeCodexEnv(input);
+
+  assert.deepEqual(input, before);
+  assert.deepEqual(Object.keys(env).sort(), [...SAFE_CODEX_ENV_ALLOWLIST].sort());
+  for (const name of SAFE_CODEX_ENV_ALLOWLIST) {
+    assert.equal(env[name], input[name]);
+  }
+  for (const name of [
+    "OPENAI_API_KEY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AZURE_CLIENT_SECRET",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "NOTION_TOKEN",
+    "MEMORY_AGENT_TOKEN",
+    "CYBERBOSS_RUN_TOKEN",
+    "WEIXIN_COOKIE",
+    "LOGIN_SESSION",
+    "SECRET_EXAMPLE",
+    "INTERNAL_TOKEN",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+  ]) {
+    assert.equal(name in env, false, `${name} must not reach Codex`);
+  }
+});
+
+test("safe Codex environment filtering emits no secret values", () => {
+  const emitted = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (...values) => emitted.push(values.join(" "));
+  console.error = (...values) => emitted.push(values.join(" "));
+  try {
+    const env = buildSafeCodexEnv({
+      PATH: "safe-path",
+      OPENAI_API_KEY: "UNIQUE-OPENAI-SECRET",
+      INTERNAL_TOKEN: "UNIQUE-INTERNAL-SECRET",
+    });
+    assert.equal(JSON.stringify(env).includes("UNIQUE-OPENAI-SECRET"), false);
+    assert.equal(JSON.stringify(env).includes("UNIQUE-INTERNAL-SECRET"), false);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+  assert.deepEqual(emitted, []);
 });
 
 test("safe restrictions cannot be overridden by ordinary configuration", () => {
@@ -328,6 +404,8 @@ test("safe dry-run starts no process and exposes no active capability", () => {
     CYBERBOSS_MEMORY_PYTHON: python,
     CYBERBOSS_MEMORY_AGENT_ROOT: root,
     CYBERBOSS_MEMORY_SQLITE: database,
+    OPENAI_API_KEY: "UNIQUE-DRY-RUN-OPENAI-SECRET",
+    INTERNAL_TOKEN: "UNIQUE-DRY-RUN-INTERNAL-SECRET",
   });
   assert.deepEqual(report.processesStarted, []);
   assert.deepEqual(report.networkConnectionsOpened, []);
@@ -337,6 +415,9 @@ test("safe dry-run starts no process and exposes no active capability", () => {
   assert.equal(report.handoffBootstrap.targetCarrier, "weixin");
   assert.equal(report.handoffBootstrap.contentDisclosed, false);
   assert.equal(Object.values(report.activeCapabilities).some(Boolean), false);
+  const serialized = JSON.stringify(report);
+  assert.equal(serialized.includes("UNIQUE-DRY-RUN-OPENAI-SECRET"), false);
+  assert.equal(serialized.includes("UNIQUE-DRY-RUN-INTERNAL-SECRET"), false);
 });
 
 test("safe runtime declines every unexpected Codex approval instead of auto-approving", async () => {

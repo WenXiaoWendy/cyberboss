@@ -10,6 +10,22 @@ const SAFE_MEMORY_TOOLS = Object.freeze([
 ]);
 const SAFE_MEMORY_SERVER = "xingxing-memory";
 const SAFE_BETA_WEIXIN_CARRIER = "weixin";
+const SAFE_CODEX_ENV_ALLOWLIST = Object.freeze([
+  // Process startup and executable discovery on supported platforms.
+  "PATH",
+  "Path",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "WINDIR",
+  "TEMP",
+  "TMP",
+  "ComSpec",
+  "PATHEXT",
+  // The official Codex CLI reads local configuration and authentication from
+  // CODEX_HOME. A real Windows initialize succeeds without forwarding the
+  // parent HOME, USERPROFILE, APPDATA, or LOCALAPPDATA values.
+  "CODEX_HOME",
+]);
 
 function isSafeBetaEnabled(value) {
   return typeof value === "string" && value.trim().toLowerCase() === "true";
@@ -35,17 +51,13 @@ function resolveSafeBetaConfig(config) {
 }
 
 function buildSafeCodexEnv(baseEnv = process.env) {
-  return Object.fromEntries(
-    Object.entries(baseEnv).filter(([name]) => {
-      const upper = name.toUpperCase();
-      return !upper.startsWith("NOTION_")
-        && !upper.startsWith("MEMORY_AGENT_")
-        && upper !== "CYBERBOSS_RUN_TOKEN"
-        && !upper.includes("WEIXIN_TOKEN")
-        && !upper.includes("SESSION")
-        && !upper.includes("COOKIE");
-    })
-  );
+  const env = {};
+  for (const name of SAFE_CODEX_ENV_ALLOWLIST) {
+    if (typeof baseEnv?.[name] === "string" && baseEnv[name]) {
+      env[name] = baseEnv[name];
+    }
+  }
+  return env;
 }
 
 function assertSafeBetaStartAllowed({ safeBeta, mode, allowedUserIds }) {
@@ -150,6 +162,7 @@ function assertDirectory(directoryPath, label) {
 
 module.exports = {
   SAFE_BETA_WEIXIN_CARRIER,
+  SAFE_CODEX_ENV_ALLOWLIST,
   SAFE_MEMORY_TOOLS,
   assertSafeBetaStartAllowed,
   buildSafeCodexEnv,

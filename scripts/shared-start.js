@@ -94,6 +94,12 @@ if (require.main === module) {
 function runStateDirPreflightChild() {
   return new Promise((resolve, reject) => {
     const childEnv = safeBeta ? buildSafeCodexEnv(process.env) : { ...process.env };
+    if (safeBeta) {
+      // These are explicit Cyberboss preflight controls, not Codex app-server
+      // environment. Do not broaden buildSafeCodexEnv to carry bridge config.
+      childEnv.CYBERBOSS_SAFE_BETA = process.env.CYBERBOSS_SAFE_BETA;
+      childEnv.CYBERBOSS_STATE_DIR = process.env.CYBERBOSS_STATE_DIR;
+    }
     const child = spawn(process.execPath, [
       path.join(rootDir, "bin", "cyberboss.js"),
       "start",
