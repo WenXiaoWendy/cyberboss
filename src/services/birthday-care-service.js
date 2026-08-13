@@ -81,7 +81,8 @@ function buildTrigger(action, now = new Date()) {
       `Birthday Care is due for ${action.friendName}.`,
       `Birthday date: ${action.birthdayDate}; stage: ${stage}; days until: ${action.daysUntil}.`,
       `Current care state: address asked=${action.state.addressAsked}; gift ordered=${action.state.giftOrdered}; pickup reminded=${action.state.pickupReminded}; birthday wished=${action.state.birthdayWished}.`,
-      "Respond naturally in the current persona. Do not expose internal ids, JSON, tool names, or state-machine details.",
+      "This is a due care obligation. Send exactly one short reminder message now in the current persona; do not choose silent.",
+      "Do not expose internal ids, JSON, tool names, or state-machine details.",
     ].join("\n"),
   };
 }

@@ -71,7 +71,7 @@ test("queue insertion is idempotent across repeated checks and restart", async (
   assert.deepEqual(repeated, []);
   assert.deepEqual(afterRestart, []);
   assert.equal(queue.drainForAccount("fake-account").length, 1);
-  assert.match(first[0].text, /Respond naturally in the current persona/);
+  assert.match(first[0].text, /Send exactly one short reminder message now/);
   assert.doesNotMatch(first[0].text, /小彻/);
 });
 
