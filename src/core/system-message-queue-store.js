@@ -39,6 +39,10 @@ class SystemMessageQueueStore {
     if (!normalized) {
       throw new Error("invalid system message");
     }
+    const existing = this.state.messages.find((candidate) => candidate.id === normalized.id);
+    if (existing) {
+      return existing;
+    }
     this.state.messages.push(normalized);
     this.state.messages.sort(compareSystemMessages);
     this.save();
