@@ -27,6 +27,8 @@ function readConfig() {
     accountsDir: path.join(stateDir, "accounts"),
     birthdayCareFile: path.join(stateDir, "birthday-care.json"),
     birthdayTimezone: readTextEnv("CYBERBOSS_BIRTHDAY_TIMEZONE") || "Asia/Shanghai",
+    birthdayCareEnabled: readBoolEnv("CYBERBOSS_ENABLE_BIRTHDAY_CARE"),
+    birthdayCareCheckIntervalMs: readIntEnv("CYBERBOSS_BIRTHDAY_CHECK_INTERVAL_MS") || 60 * 60 * 1000,
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),

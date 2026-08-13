@@ -13,7 +13,7 @@ class ProjectToolHost {
   }
 
   listTools() {
-    const builtIn = PROJECT_TOOLS.map((tool) => ({
+    const builtIn = availableProjectTools(this.services).map((tool) => ({
       name: tool.name,
       description: buildToolDescription(tool),
       inputSchema: tool.inputSchema,
@@ -23,7 +23,7 @@ class ProjectToolHost {
   }
 
   async invokeTool(toolName, args = {}, context = {}) {
-    const spec = PROJECT_TOOLS.find((candidate) => candidate.name === toolName);
+    const spec = availableProjectTools(this.services).find((candidate) => candidate.name === toolName);
     const normalizedArgs = args && typeof args === "object" ? args : {};
     if (spec) {
       validateSchema(spec.inputSchema, normalizedArgs, toolName, "input");
@@ -118,12 +118,13 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_birthday_upsert",
+    service: "birthday",
     description: "Save or update a recurring birthday. Use solar unless the user explicitly says the birthday is lunar. Never store a full delivery address in notes.",
     shortHint: "Save or update a solar or lunar birthday.",
     topics: ["birthday"],
     inputSchema: {
       type: "object",
-      required: ["name"],
+      required: ["name", "month", "day"],
       properties: {
         name: { type: "string", description: "Friend name used to create or find the record." },
         calendar: { type: "string", description: "solar or lunar." },
@@ -148,6 +149,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_birthday_list",
+    service: "birthday",
     description: "List recurring birthdays saved in Birthday Care.",
     shortHint: "List saved birthdays.",
     topics: ["birthday"],
@@ -166,6 +168,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_birthday_upcoming",
+    service: "birthday",
     description: "List upcoming birthdays sorted by each birthday's next resolved solar date, including lunar birthdays recalculated for the year.",
     shortHint: "List upcoming birthdays in actual date order.",
     topics: ["birthday"],
@@ -188,6 +191,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_birthday_mark",
+    service: "birthday",
     description: "Mark a completed action for one birthday cycle so Birthday Care will not remind the user about it again. Status must be address_asked, gift_ordered, pickup_reminded, or birthday_wished.",
     shortHint: "Mark an annual birthday-care action complete.",
     topics: ["birthday"],
@@ -221,6 +225,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_birthday_remove",
+    service: "birthday",
     description: "Remove a recurring birthday and its annual care cycles.",
     shortHint: "Remove a saved birthday.",
     topics: ["birthday"],
@@ -673,6 +678,10 @@ const PROJECT_TOOLS = [
 const STATIC_EXTRA_TOOL_NAMES = new WhereaboutsToolHost({ service: null })
   .listTools()
   .map((tool) => tool.name);
+
+function availableProjectTools(services = {}) {
+  return PROJECT_TOOLS.filter((tool) => !tool.service || services[tool.service]);
+}
 
 function createExtraToolHosts(services = {}) {
   const hosts = [];

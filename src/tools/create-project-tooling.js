@@ -2,7 +2,7 @@ const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
 const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { ChannelFileService } = require("../services/channel-file-service");
-const { BirthdayCareService } = require("../services/birthday-care-service");
+const { createBirthdayCareService } = require("../services/birthday-care-service");
 const { DiaryService } = require("../services/diary-service");
 const { ReminderService } = require("../services/reminder-service");
 const { StickerService } = require("../services/sticker-service");
@@ -24,7 +24,7 @@ function createProjectTooling(config, options = {}) {
   });
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const services = {
-    birthday: new BirthdayCareService({ config }),
+    birthday: createBirthdayCareService({ config }),
     diary: new DiaryService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
     system: new SystemMessageService({ config, sessionStore }),

@@ -80,6 +80,7 @@ class CyberbossApp {
     this.turnGateStore = new TurnGateStore();
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
+    this.nextBirthdayCareCheckAtMs = 0;
     this.turnBoundaryScopeKeys = new Set();
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
@@ -901,37 +902,48 @@ class CyberbossApp {
     return Math.max(MIN_LONG_POLL_TIMEOUT_MS, Math.min(DEFAULT_LONG_POLL_TIMEOUT_MS, remainingMs));
   }
 
-  async flushDueBirthdays(account) {
+  async flushDueBirthdays(account, { now = new Date(), force = false } = {}) {
     const birthday = this.projectServices?.birthday;
     if (!birthday) {
       return [];
     }
-    const sessionStore = this.runtimeAdapter.getSessionStore();
-    const senderId = resolvePreferredSenderId({
-      config: this.config,
-      accountId: account.accountId,
-      sessionStore,
-    });
-    const workspaceRoot = resolvePreferredWorkspaceRoot({
-      config: this.config,
-      accountId: account.accountId,
-      senderId,
-      sessionStore,
-    });
-    if (!senderId || !workspaceRoot) {
+    const nowMs = new Date(now).getTime();
+    if (!force && Number.isFinite(this.nextBirthdayCareCheckAtMs) && nowMs < this.nextBirthdayCareCheckAtMs) {
       return [];
     }
-    return birthday.processDue({
-      now: new Date(),
-      enqueue: (trigger) => this.systemMessageQueue.enqueue({
-        id: trigger.id,
+    const intervalMs = Number(this.config.birthdayCareCheckIntervalMs) || 60 * 60 * 1000;
+    this.nextBirthdayCareCheckAtMs = nowMs + Math.max(60_000, intervalMs);
+    try {
+      const sessionStore = this.runtimeAdapter.getSessionStore();
+      const senderId = resolvePreferredSenderId({
+        config: this.config,
+        accountId: account.accountId,
+        sessionStore,
+      });
+      const workspaceRoot = resolvePreferredWorkspaceRoot({
+        config: this.config,
         accountId: account.accountId,
         senderId,
-        workspaceRoot,
-        text: trigger.text,
-        createdAt: trigger.createdAt,
-      }),
-    });
+        sessionStore,
+      });
+      if (!senderId || !workspaceRoot) {
+        return [];
+      }
+      return await birthday.processDue({
+        now,
+        enqueue: (trigger) => this.systemMessageQueue.enqueue({
+          id: trigger.id,
+          accountId: account.accountId,
+          senderId,
+          workspaceRoot,
+          text: trigger.text,
+          createdAt: trigger.createdAt,
+        }),
+      });
+    } catch (error) {
+      console.error(`[cyberboss] Birthday Care check failed: ${formatErrorMessage(error)}`);
+      return [];
+    }
   }
 
   async flushDueReminders(account) {
@@ -982,9 +994,6 @@ class CyberbossApp {
       return false;
     }
     const dispatched = await this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
-    if (dispatched) {
-      this.projectServices?.birthday?.markStageSentByTriggerId(message.id);
-    }
     return dispatched;
   }
 
