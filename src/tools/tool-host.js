@@ -117,6 +117,130 @@ const PROJECT_TOOLS = [
     },
   },
   {
+    name: "cyberboss_birthday_upsert",
+    description: "Save or update a recurring birthday. Use solar unless the user explicitly says the birthday is lunar. Never store a full delivery address in notes.",
+    shortHint: "Save or update a solar or lunar birthday.",
+    topics: ["birthday"],
+    inputSchema: {
+      type: "object",
+      required: ["name"],
+      properties: {
+        name: { type: "string", description: "Friend name used to create or find the record." },
+        calendar: { type: "string", description: "solar or lunar." },
+        month: { type: "integer", description: "Birthday month from 1 to 12." },
+        day: { type: "integer", description: "Birthday day. Lunar day may be 1 to 30." },
+        leapMonth: { type: "boolean", description: "True only when the user explicitly says this is a lunar leap-month birthday." },
+        timezone: { type: "string", description: "Optional IANA timezone, default Asia/Shanghai." },
+        notes: { type: "string", description: "Optional care notes. Do not put a full delivery address here." },
+        prepareDaysBefore: { type: "integer", description: "Optional preparation offset, default 7." },
+        followupDaysBefore: { type: "integer", description: "Optional gift follow-up offset, default 4." },
+        pickupDaysBefore: { type: "integer", description: "Optional pickup offset, default 2." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.birthday.upsert(args);
+      return {
+        text: `Birthday saved for ${result.name}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_birthday_list",
+    description: "List recurring birthdays saved in Birthday Care.",
+    shortHint: "List saved birthdays.",
+    topics: ["birthday"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = await services.birthday.list();
+      return {
+        text: result.length ? `Saved birthdays: ${result.map((item) => item.name).join(", ")}.` : "No birthdays saved.",
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_birthday_upcoming",
+    description: "List upcoming birthdays sorted by each birthday's next resolved solar date, including lunar birthdays recalculated for the year.",
+    shortHint: "List upcoming birthdays in actual date order.",
+    topics: ["birthday"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum number of birthdays." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.birthday.upcoming(args);
+      return {
+        text: result.length
+          ? `Upcoming birthdays: ${result.map((item) => `${item.name} ${item.nextSolarDate}`).join("; ")}.`
+          : "No upcoming birthdays saved.",
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_birthday_mark",
+    description: "Mark a completed action for one birthday cycle so Birthday Care will not remind the user about it again. Status must be address_asked, gift_ordered, pickup_reminded, or birthday_wished.",
+    shortHint: "Mark an annual birthday-care action complete.",
+    topics: ["birthday"],
+    inputSchema: {
+      type: "object",
+      required: ["friend", "status"],
+      properties: {
+        friend: { type: "string", description: "Friend name or Birthday Care id." },
+        status: { type: "string", description: "address_asked, gift_ordered, pickup_reminded, or birthday_wished." },
+        year: { type: "integer", description: "Optional occurrence year; normally omit to use the active care cycle." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.birthday.mark({
+        name: args.friend,
+        status: args.status,
+        year: args.year,
+      });
+      const labels = {
+        address_asked: "address asked",
+        gift_ordered: "gift ordered",
+        pickup_reminded: "pickup reminded",
+        birthday_wished: "birthday wished",
+      };
+      return {
+        text: `Birthday care updated for ${result.friend.name}: ${labels[result.status]}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_birthday_remove",
+    description: "Remove a recurring birthday and its annual care cycles.",
+    shortHint: "Remove a saved birthday.",
+    topics: ["birthday"],
+    inputSchema: {
+      type: "object",
+      required: ["friend"],
+      properties: {
+        friend: { type: "string", description: "Friend name or Birthday Care id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.birthday.remove({ name: args.friend });
+      return {
+        text: `Birthday removed for ${result.name}.`,
+        data: result,
+      };
+    },
+  },
+  {
     name: "cyberboss_system_send",
     description: "Queue an internal Cyberboss system trigger for the current bound workspace and chat.",
     shortHint: "Queue an internal system message for the current workspace.",
