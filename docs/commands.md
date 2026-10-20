@@ -114,3 +114,10 @@ Notes:
 - there is no separate `/context` command; use `/status` and read the `📦 context` line
 - `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command
+
+### Web tools
+
+- `cyberboss_web_search`: find current information with an `objective` and `search_queries`.
+- `cyberboss_web_fetch`: read up to 20 HTTP(S) `urls`, optionally with an `objective`, `search_queries`, or `full_content`.
+
+These project tools use anonymous Parallel Search MCP by default and require normal runtime permission. Set `CYBERBOSS_WEB_SEARCH_PROVIDER=runtime` or `disabled` before starting the bridge to omit them. Existing native search and separately configured MCP servers remain available.

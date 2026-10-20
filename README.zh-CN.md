@@ -367,6 +367,19 @@ npm run shared:open
 - 不要把 `npm run shared:start` 放到后台跑；它就是共享桥接主进程
 - Windows 用户不要再使用 `.sh` 入口；共享启动和接管请统一使用 `npm run shared:start` / `npm run shared:open`
 
+### 网页搜索与读取
+
+Cyberboss 为 Codex 和 Claude Code 提供免费的 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) 网页搜索与读取工具，无需 Parallel 账号或 API key，搜索使用 Fast 模式。可以让 Agent 查询最新信息，或提供网页 URL 让它读取；工具会返回来源链接与内容摘录。
+
+通过 `CYBERBOSS_WEB_SEARCH_PROVIDER` 选择行为：
+
+- `parallel`（默认）：提供 `cyberboss_web_search` 和 `cyberboss_web_fetch`。
+- `runtime`：使用现有 runtime 或单独配置的 MCP 搜索工具。
+- `disabled`：隐藏这两个 Cyberboss 网页工具，禁止通过它们发出请求；不影响在 Codex 或 Claude 中单独配置的工具。
+
+现有原生搜索设置、凭据、MCP 配置和已保存的审批选择保持不变。新的网页工具遵循 runtime 的正常审批流程，Cyberboss 不会自动批准。只有调用工具时，查询、目标和请求的 URL 才会发送给 Parallel。免费服务有用量限制；出错时会将错误返回 Agent，不会自动切换服务。每次操作超时为 30 秒，并支持 MCP 取消请求。
+
+
 <a id="data-dir"></a>
 ## 本地数据放在哪里
 

@@ -355,6 +355,18 @@ Notes:
 - Do not keep multiple `cyberboss` bridge processes alive at the same time
 - Do not put `npm run shared:start` in the background; it is the main shared bridge process
 
+### Web search and page reading
+
+Cyberboss project tools include free [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) search and page reading for Codex and Claude Code. No Parallel account or API key is needed; search uses Fast mode. Ask the agent for current information or give it a page URL to read. The tools return source URLs and excerpts.
+
+`CYBERBOSS_WEB_SEARCH_PROVIDER` controls these project tools:
+
+- `parallel` (default): expose `cyberboss_web_search` and `cyberboss_web_fetch`.
+- `runtime`: leave search to your existing runtime or separately configured MCP servers.
+- `disabled`: hide both Cyberboss web tools and prevent requests through them. This does not disable tools configured separately in Codex or Claude.
+
+Existing native search settings, credentials, MCP servers and saved approval choices are preserved. New web tools use the normal runtime approval flow; Cyberboss does not automatically approve them. Queries, objectives and requested URLs are sent to Parallel only when a web tool runs. Free access has usage limits; service errors are returned to the agent without switching providers. Each operation has a 30-second timeout and supports MCP cancellation.
+
 <a id="data-dir"></a>
 ## Local Data
 
@@ -467,6 +479,7 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 - [docs/commands.md](./docs/commands.md)
 
 <a id="faq"></a>
+
 ## FAQ
 
 ### Why not `npm install cyberboss`?

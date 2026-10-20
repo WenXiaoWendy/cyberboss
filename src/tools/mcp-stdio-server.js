@@ -1,6 +1,7 @@
 const fs = require("fs");
 function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
   const reader = createMessageReader(process.stdin);
+  const pendingCalls = new Map();
   const toolCatalog = toolHost.listTools();
   const resources = buildToolResources(toolCatalog);
 
@@ -13,6 +14,11 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
     const params = message.params || {};
 
     try {
+      if (method === "notifications/cancelled") {
+        pendingCalls.get(params.requestId)?.abort();
+        return;
+      }
+
       if (method === "initialize") {
         writeRpcResponse(id, {
           protocolVersion: params.protocolVersion || "2024-11-05",
@@ -94,10 +100,18 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
         const args = params.arguments && typeof params.arguments === "object"
           ? params.arguments
           : {};
-        const result = await toolHost.invokeTool(toolName, args, {
-          runtimeId,
-          workspaceRoot,
-        });
+        const controller = new AbortController();
+        pendingCalls.set(id, controller);
+        let result;
+        try {
+          result = await toolHost.invokeTool(toolName, args, {
+            runtimeId,
+            workspaceRoot,
+            signal: controller.signal,
+          });
+        } finally {
+          pendingCalls.delete(id);
+        }
         writeRpcResponse(id, {
           content: [
             {

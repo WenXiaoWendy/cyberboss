@@ -41,6 +41,7 @@ const {
   splitCommandLine,
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
+const { listProjectToolNames } = require("../tools/tool-host");
 const { createProjectTooling } = require("../tools/create-project-tooling");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
@@ -1990,8 +1991,8 @@ function matchesBuiltInCommandPrefix(commandTokens) {
     return true;
   }
 
-   if (normalized[0] === "mcp_tool" && normalized[1] === "cyberboss_tools") {
-    return true;
+  if (normalized[0] === "mcp_tool" && normalized[1] === "cyberboss_tools") {
+    return listProjectToolNames().includes(normalized[2]);
   }
 
   return false;

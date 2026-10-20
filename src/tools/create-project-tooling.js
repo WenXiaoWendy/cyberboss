@@ -9,6 +9,7 @@ const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
 const { RuntimeContextStore } = require("./runtime-context-store");
 const { ProjectToolHost } = require("./tool-host");
+const { WebSearchService } = require("../services/web-search-service");
 const { WhereaboutsService } = require("whereabouts-mcp");
 
 function createProjectTooling(config, options = {}) {
@@ -23,6 +24,7 @@ function createProjectTooling(config, options = {}) {
   });
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const services = {
+    webSearch: new WebSearchService({ config, ...options.webSearchOptions }),
     diary: new DiaryService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
     system: new SystemMessageService({ config, sessionStore }),

@@ -36,7 +36,7 @@ class ProjectToolHost {
     }
     for (const host of this.extraToolHosts) {
       if (host.listTools().some((tool) => tool.name === toolName)) {
-        return await host.invokeTool(toolName, normalizedArgs);
+        return await host.invokeTool(toolName, normalizedArgs, context);
       }
     }
     throw new Error(`Unknown tool: ${toolName}`);
@@ -552,6 +552,9 @@ const STATIC_EXTRA_TOOL_NAMES = new WhereaboutsToolHost({ service: null })
 
 function createExtraToolHosts(services = {}) {
   const hosts = [];
+  if (services.webSearch) {
+    hosts.push(services.webSearch);
+  }
   if (services.whereabouts) {
     hosts.push(new WhereaboutsToolHost({ service: services.whereabouts }));
   }
